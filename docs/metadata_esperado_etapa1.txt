@@ -1,0 +1,65 @@
+## variaveis obtidas da planilha de input 'base-lead_amostra_v2.xlsx' 
+'original_id' = legalDocument
+'original_nome', = name
+'original_endereco_completo', = street+number+complement+district+postcode+city+state+country em base-lead_amostra_v2
+'original_telefone', phone
+'original_telefone_place', placesPhone
+'original_website', = website
+'original_avaliacao_google', placesRating
+'original_latitude', placesLat
+'original_longitude', placesLng
+'original_place_users',	placesUserRatingsTotal
+'original_place_website', placesWebsite
+'original_email', email
+
+## variaveis obtidas por scraper de redes sociais apify
+'gdr_facebook_url',
+'gdr_facebook_mail',
+'gdr_facebook_whatsapp',
+'gdr_facebook_id',
+'gdr_facebook_username',
+'gdr_facebook_followers',
+'gdr_facebook_likes',
+'gdr_facebook_category',
+'gdr_facebook_bio',
+'gdr_facebook_is_verified',
+'gdr_instagram_url',
+'gdr_instagram_id',
+'gdr_instagram_username',
+'gdr_instagram_followers',
+'gdr_instagram_following',
+'gdr_instagram_bio',
+'gdr_instagram_is_verified',
+'gdr_instagram_is_business',
+'gdr_linktree_username',
+'gdr_linktree_title',
+'gdr_linktree_description',
+'gdr_linktree_social_urls',
+'gdr_linktree_links_details',
+'gdr_linkedin_url',
+
+## variaveis obtidas por escraper website
+'gdr_cwral4ai_url',
+'gdr_cwral4ai_email',
+'gdr_cwral4ai_telefone',
+'gdr_cwral4ai_whatsapp',
+'gdr_cwral4ai_youtube_url',
+
+## variaveis obtidas por escraper google search engine
+'gdr_google_search_engine_url',
+'gdr_google_search_engine_email',
+'gdr_google_search_engine_telefone',
+'gdr_google_search_engine_whatsapp',
+'gdr_google_search_engine_youtube_url',
+
+
+## variaveis obtidas após consolidação e concenso
+'gdr_concenso_url',
+'gdr_concenso_email',
+'gdr_concenso_telefone',
+'gdr_concenso_whatsapp',
+'gdr_concenso_total_campos_originais'
+'gdr_concenso_total_campos_enriquecidos'
+'gdr_concenso_novos_campos_adicionados
+'gdr_concenso_synergy_score_categoria', 
+'gdr_concenso_synergy_score_justificativa',

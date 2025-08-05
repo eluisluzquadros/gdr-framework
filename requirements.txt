@@ -1,0 +1,43 @@
+# GDR Framework - Python Dependencies
+
+# Core Data Processing
+pandas>=1.5.0
+numpy>=1.24.0
+openpyxl>=3.1.0
+xlsxwriter>=3.0.0
+
+# HTTP & Async
+aiohttp>=3.8.0
+requests>=2.28.0
+asyncio
+
+# Environment & Config
+python-dotenv>=1.0.0
+
+# Text Processing & Web Scraping
+beautifulsoup4>=4.11.0
+lxml>=4.9.0
+
+# LLM APIs
+openai>=1.0.0
+anthropic>=0.7.0
+google-generativeai>=0.3.0
+
+# Statistics & ML
+scikit-learn>=1.3.0
+scipy>=1.10.0
+
+# Utilities
+pathlib
+dataclasses
+typing
+
+# Development & Testing
+pytest>=7.4.0
+pytest-asyncio>=0.21.0
+pytest-cov>=4.1.0
+
+# Code Quality
+black>=23.0.0
+flake8>=6.0.0
+mypy>=1.5.0

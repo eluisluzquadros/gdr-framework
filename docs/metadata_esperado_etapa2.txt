@@ -1,0 +1,94 @@
+## variaveis obtidas por insights gerados pelo Agente IA - LLM OpenAI
+'gdr_llm_openai_resumo_qualitativo_reviews_google_place',
+'gdr_llm_openai_analise_localização_google_place',
+'gdr_llm_openai_analise_fluxo_pessoas_comercio',
+'gdr_llm_openai_concorrentes_buffer_500m',
+'gdr_llm_openaillm1_vetores_geradores_trafego_buffer_500m',
+'gdr_llm_openai_potencial_geomarkenting_categoria',
+'gdr_llm_openai_potencial_geomarketing_justificativa',
+'gdr_llm_openai_abordagem_sugerida_pitch',  
+'gdr_llm_openai_synergy_score_categoria', 
+'gdr_llm_openai_synergy_score_justificativa',
+
+
+## variaveis obtidas por insights gerados pelo Agente IA - LLM Gemini
+'gdr_llm_gemini_resumo_qualitativo_reviews_google_place',
+'gdr_llm_gemini_analise_localização_google_place',
+'gdr_llm_gemini_analise_fluxo_pessoas_comercio',
+'gdr_llm_gemini_concorrentes_buffer_500m',
+'gdr_llm_gemini_vetores_geradores_trafego_buffer_500m',
+'gdr_llm_gemini_potencial_geomarkenting_categoria',
+'gdr_llm_gemini_potencial_geomarketing_justificativa',
+'gdr_llm_gemini_abordagem_sugerida_pitch',  
+'gdr_llm_gemini_synergy_score_categoria', 
+'gdr_llm_gemini_synergy_score_justificativa',
+
+
+## variaveis obtidas por insights gerados pelo Agente IA - LLM DeepSeek
+'gdr_llm_deepseek_resumo_qualitativo_reviews_google_place',
+'gdr_llm_deepseek_analise_localização_google_place',
+'gdr_llm_deepseek_analise_fluxo_pessoas_comercio',
+'gdr_llm_deepseek_concorrentes_buffer_500m',
+'gdr_llm_deepseek_vetores_geradores_trafego_buffer_500m',
+'gdr_llm_deepseek_potencial_geomarkenting_categoria',
+'gdr_llm_deepseek_potencial_geomarketing_justificativa',
+'gdr_llm_deepseek_abordagem_sugerida_pitch',  
+'gdr_llm_deepseek_synergy_score_categoria', 
+'gdr_llm_deepseek_synergy_score_justificativa',
+
+## variaveis obtidas pela análise de consenso
+...
+
+## variaveis obtidas após consolidação e concenso
+'gdr_concenso_url',
+'gdr_concenso_email',
+'gdr_concenso_telefone',
+'gdr_concenso_whatsapp',
+'gdr_concenso_resumo_qualitativo_reviews_google_place',
+'gdr_concenso_analise_localização_google_place',
+'gdr_concenso_analise_fluxo_pessoas_comercio',
+'gdr_concenso_concorrentes_buffer_500m',
+'gdr_concenso_vetores_geradores_trafego_buffer_500m',
+'gdr_concenso_potencial_geomarkenting_categoria',
+'gdr_concenso_potencial_geomarketing_justificativa',
+'gdr_concenso_abordagem_sugerida_pitch',  
+'gdr_concenso_probabilidade_conversao'
+'gdr_concenso_valor_estimado_leda 
+'gdr_concenso_total_campos_originais'
+'gdr_concenso_total_campos_enriquecidos'
+'gdr_concenso_novos_campos_adicionados
+'gdr_concenso_potencial_crescimento '
+'gdr_concenso_synergy_score_categoria', 
+'gdr_concenso_synergy_score_justificativa',
+
+## variaveis obtidas pelo Agente Revisor
+...
+
+# MODO PREMIUM
+## variaveis obtidas pela analise do google street view api e visão computacional
+...
+'gdr_analise_aparencia_fachada_street_view'
+
+
+# Exemplos de insights gerados por Agentes AI:
+
+- gdr_analise_reviews : agente escreve síntese de todos os reviews encontrados
+exemplo: "Clientes elogiam a variedade de acessórios e o atendimento, mas as principais queixas são a falta de resolução de problemas pela gerência, táticas de vendas agressivas e informações enganosas sobre a garantia."
+
+- gdr_analise_fachada : agente descreve a fachada com street view (a loja existe ou é terreno baldio)
+exemplo: "Fachada moderna e profissional com grande vitrine. Branding claro. Aparência de loja bem estabelecida."
+
+- gdr_potencial_geomarketing: 
+exemplo: "Alto Fluxo. Localização nobre na R. X ao lado do Shopping Y, garantindo tráfego intenso."
+
+- gdr_concorrentes_proximos : agente identifica leads concorrentes em raio de X metros
+exemplo: "Lead X Celulares", "Lead Y Celulares Filial"
+
+- gdr_geradores_trafego : agente identifica possíveis "ancoras" que maximizam fluxo de clientes potencial num raio de X metros
+exemplo: "Shopping Germânia, Lojas Renner, Praça X, Magazine Luiza, Farmácias São João"
+
+- gdr_resumo_qualitativo : agente escreve uma síntese dos pontos fortes e fracos do lead
+exemplo: "Lead ABC, apesar de ter uma boa visibilidade de loja e variedade de produtos elogiada, enfrenta sérias críticas relacionadas à gestão, táticas de vendas agressivas e informações enganosas sobre a garantia. Isso sugere que, embora o produto e o atendimento inicial sejam positivos, há falhas significativas na pós-venda e na transparência que afetam a satisfação do cliente."
+
+- gdr_abordagem_sugerida : agente escreve recomendação de texto para abordagem outbound
+exemplo: "Olá! Vi que a Lead X é especialista em acessórios no coração da Rua Y. Como vocês já têm o cliente que busca variedade, nossa linha de películas premium pode aumentar ainda mais seu ticket médio..."
