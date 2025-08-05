@@ -50,19 +50,21 @@ def validate_environment():
 def print_banner():
     """Imprime banner do GDR"""
     banner = """
-    ╔══════════════════════════════════════════════════════════════╗
-    ║                    GDR Framework MVP                         ║
-    ║            Generative Development Representative             ║
-    ║                                                              ║
-    ║  🤖 Multi-LLM Lead Enrichment & Consensus                   ║
-    ║  📊 Statistical Analysis with Kappa Scores                  ║
-    ║  💰 Token Usage & Cost Tracking                             ║
-    ║  📈 Professional Excel Reports                              ║
-    ╚══════════════════════════════════════════════════════════════╝
+    ==============================================================
+                        GDR Framework MVP                         
+              Generative Development Representative             
+                                                              
+      * Multi-LLM Lead Enrichment & Consensus                   
+      * Statistical Analysis with Kappa Scores                  
+      * Token Usage & Cost Tracking                             
+      * Professional Excel Reports                              
+    ==============================================================
     """
     print(banner)
 
-async def run_processing(input_file: str, max_leads: int = 50, output_dir: str = "outputs"):
+async def run_processing(input_file: str, max_leads: int = 50, output_dir: str = "outputs",
+                        enable_social_media: bool = True, enable_website: bool = True, 
+                        enable_search: bool = True, max_concurrent: int = 10, auto_confirm: bool = False):
     """Executa o processamento principal"""
     
     logger.info("=" * 60)
@@ -81,7 +83,13 @@ async def run_processing(input_file: str, max_leads: int = 50, output_dir: str =
     try:
         # Inicializar framework
         logger.info("Inicializando GDR Framework...")
-        gdr = GDRFramework()
+        logger.info(f"Configurações: Social Media={enable_social_media}, Website={enable_website}, Search={enable_search}")
+        gdr = GDRFramework(
+            enable_social_media_scrapers=enable_social_media,
+            enable_website_scraper=enable_website,
+            enable_search_scraper=enable_search,
+            max_social_attempts=1
+        )
         
         # Carregar leads
         logger.info(f"Carregando leads de: {input_file}")
@@ -100,11 +108,15 @@ async def run_processing(input_file: str, max_leads: int = 50, output_dir: str =
         logger.info(f"Custo estimado: ${estimated_cost:.3f} USD")
         
         # Confirmar processamento
-        if max_leads > 20:
-            response = input(f"\nProcessar {len(test_leads)} leads? (y/N): ")
-            if response.lower() != 'y':
-                logger.info("Processamento cancelado pelo usuário")
-                return False
+        if max_leads > 20 and not auto_confirm:
+            # Se executado via script, processar automaticamente
+            if not sys.stdin.isatty():
+                logger.info("Modo não-interativo detectado, processando automaticamente...")
+            else:
+                response = input(f"\nProcessar {len(test_leads)} leads? (y/N): ")
+                if response.lower() != 'y':
+                    logger.info("Processamento cancelado pelo usuário")
+                    return False
         
         # Processar leads
         logger.info("Iniciando processamento...")
@@ -112,7 +124,7 @@ async def run_processing(input_file: str, max_leads: int = 50, output_dir: str =
         
         results, token_usages = await gdr.process_leads_batch(
             test_leads, 
-            max_concurrent=3
+            max_concurrent=max_concurrent
         )
         
         end_time = datetime.now()
@@ -126,13 +138,13 @@ async def run_processing(input_file: str, max_leads: int = 50, output_dir: str =
         logger.info("=" * 60)
         logger.info("PROCESSAMENTO CONCLUÍDO")
         logger.info("=" * 60)
-        logger.info(f"⏱️  Tempo total: {processing_time:.1f} segundos")
-        logger.info(f"📊 Leads processados: {len(results)}")
-        logger.info(f"✅ Sucessos: {successful}")
-        logger.info(f"❌ Falhas: {len(results) - successful}")
-        logger.info(f"🔤 Tokens utilizados: {total_tokens:,}")
-        logger.info(f"💰 Custo total: ${total_cost:.6f} USD")
-        logger.info(f"📈 Custo médio/lead: ${total_cost/len(results):.6f} USD")
+        logger.info(f"Tempo total: {processing_time:.1f} segundos")
+        logger.info(f"Leads processados: {len(results)}")
+        logger.info(f"Sucessos: {successful}")
+        logger.info(f"Falhas: {len(results) - successful}")
+        logger.info(f"Tokens utilizados: {total_tokens:,}")
+        logger.info(f"Custo total: ${total_cost:.6f} USD")
+        logger.info(f"Custo médio/lead: ${total_cost/len(results):.6f} USD")
         
         # Exportar resultados
         logger.info(f"Exportando resultados para: {output_file}")
@@ -140,12 +152,12 @@ async def run_processing(input_file: str, max_leads: int = 50, output_dir: str =
         
         # Relatório final
         print("\n" + "=" * 60)
-        print("🎉 PROCESSAMENTO CONCLUÍDO COM SUCESSO!")
+        print("PROCESSAMENTO CONCLUIDO COM SUCESSO!")
         print("=" * 60)
-        print(f"📁 Arquivo de resultados: {output_file}")
-        print(f"📊 Taxa de sucesso: {successful/len(results)*100:.1f}%")
-        print(f"💰 Custo total: ${total_cost:.6f} USD")
-        print(f"⚡ Velocidade: {len(results)/processing_time:.2f} leads/segundo")
+        print(f"Arquivo de resultados: {output_file}")
+        print(f"Taxa de sucesso: {successful/len(results)*100:.1f}%")
+        print(f"Custo total: ${total_cost:.6f} USD")
+        print(f"Velocidade: {len(results)/processing_time:.2f} leads/segundo")
         print("=" * 60)
         
         return True
@@ -160,8 +172,8 @@ def main():
     
     parser.add_argument(
         '--input', '-i',
-        default='leads.xlsx',
-        help='Arquivo Excel de entrada (default: leads.xlsx)'
+        default='data/input/leads.xlsx',
+        help='Arquivo Excel de entrada (default: data/input/leads.xlsx)'
     )
     
     parser.add_argument(
@@ -183,6 +195,49 @@ def main():
         help='Apenas validar configuração sem processar'
     )
     
+    parser.add_argument(
+        '--no-social-media',
+        action='store_true',
+        help='Desabilita scrapers de redes sociais (Instagram, Facebook, Linktree) para processamento mais rápido'
+    )
+    
+    parser.add_argument(
+        '--no-website',
+        action='store_true',
+        help='Desabilita scraper de websites'
+    )
+    
+    parser.add_argument(
+        '--no-search',
+        action='store_true',
+        help='Desabilita Google Search scraper'
+    )
+    
+    parser.add_argument(
+        '--fast-mode',
+        action='store_true',
+        help='Modo rápido - desabilita todos os scrapers de redes sociais'
+    )
+    
+    parser.add_argument(
+        '--concurrent', '-c',
+        type=int,
+        default=10,
+        help='Número de leads para processar simultaneamente (default: 10)'
+    )
+    
+    parser.add_argument(
+        '--test-instagram',
+        action='store_true',
+        help='Usar arquivo de teste com leads do Instagram'
+    )
+    
+    parser.add_argument(
+        '--yes', '-y',
+        action='store_true',
+        help='Confirmar automaticamente o processamento'
+    )
+    
     args = parser.parse_args()
     
     # Banner
@@ -196,15 +251,28 @@ def main():
         return 1
     
     if args.validate_only:
-        print("✅ Configuração validada com sucesso!")
+        print("Configuracao validada com sucesso!")
         return 0
     
     # Executar processamento
     try:
+        # Determinar configurações
+        enable_social = not args.no_social_media and not args.fast_mode
+        enable_website = not args.no_website
+        enable_search = not args.no_search
+        
+        # Selecionar arquivo de entrada
+        input_file = 'data/input/test_instagram_leads.xlsx' if args.test_instagram else args.input
+        
         success = asyncio.run(run_processing(
-            args.input,
+            input_file,
             args.max_leads,
-            args.output_dir
+            args.output_dir,
+            enable_social_media=enable_social,
+            enable_website=enable_website,
+            enable_search=enable_search,
+            max_concurrent=args.concurrent,
+            auto_confirm=args.yes
         ))
         
         return 0 if success else 1

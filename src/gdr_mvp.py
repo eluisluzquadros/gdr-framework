@@ -37,6 +37,68 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 @dataclass
+class LeadInput:
+    """Modelo de dados conforme metadata_esperado_etapa1.txt"""
+    # Variáveis obrigatórias do metadata
+    original_id: str  # legalDocument
+    original_nome: str  # name
+    original_endereco_completo: str  # street+number+complement+district+postcode+city+state+country
+    original_telefone: Optional[str]  # phone
+    original_telefone_place: Optional[str]  # placesPhone
+    original_website: Optional[str]  # website
+    original_avaliacao_google: Optional[float]  # placesRating
+    original_latitude: Optional[float]  # placesLat
+    original_longitude: Optional[float]  # placesLng
+    original_place_users: Optional[int]  # placesUserRatingsTotal
+    original_place_website: Optional[str]  # placesWebsite
+    original_email: Optional[str]  # email
+    original_instagram_url: Optional[str]  # instagramUrl
+    
+    # Campos adicionais para processamento interno
+    _places_id: Optional[str] = None  # Para referência interna
+    
+    @property
+    def display_name(self) -> str:
+        return f"{self.original_nome} (ID: {self.original_id})"
+
+@dataclass
+class CollectedData:
+    """Dados coletados pelos scrapers"""
+    # Social Media
+    gdr_facebook_url: Optional[str] = None
+    gdr_facebook_email: Optional[str] = None
+    gdr_facebook_whatsapp: Optional[str] = None
+    gdr_facebook_followers: Optional[int] = None
+    
+    gdr_instagram_url: Optional[str] = None
+    gdr_instagram_followers: Optional[int] = None
+    gdr_instagram_bio: Optional[str] = None
+    gdr_instagram_verified: Optional[bool] = None
+    
+    gdr_linktree_url: Optional[str] = None
+    gdr_linktree_links: Optional[str] = None
+    
+    # Website
+    gdr_website_email: Optional[str] = None
+    gdr_website_phone: Optional[str] = None
+    gdr_website_whatsapp: Optional[str] = None
+    gdr_website_youtube: Optional[str] = None
+    
+    # Google Search
+    gdr_search_email: Optional[str] = None
+    gdr_search_phone: Optional[str] = None
+    gdr_search_additional_info: Optional[str] = None
+
+@dataclass
+class TokenUsage:
+    """Controle de uso de tokens por LLM"""
+    provider: str
+    input_tokens: int
+    output_tokens: int
+    total_tokens: int
+    cost_usd: float
+
+@dataclass
 class ProcessingState:
     """Estado do processamento para recuperação"""
     batch_id: str
@@ -44,7 +106,7 @@ class ProcessingState:
     processed_leads: Set[str]
     failed_leads: Set[str]
     completed_results: List[Dict[str, Any]]
-    token_usages: List['TokenUsage']
+    token_usages: List[TokenUsage]
     start_time: datetime
     last_checkpoint: datetime
     
@@ -73,7 +135,7 @@ class ProcessingState:
         
         return None
     
-    def get_remaining_leads(self, all_leads: List['LeadInput']) -> List['LeadInput']:
+    def get_remaining_leads(self, all_leads: List[LeadInput]) -> List[LeadInput]:
         """Retorna leads que ainda precisam ser processados"""
         return [lead for lead in all_leads if lead.original_id not in self.processed_leads]
     
@@ -167,67 +229,6 @@ class PersistenceManager:
         self.release_lock(batch_id)
         
         logger.info(f"Limpeza concluída para batch {batch_id}")
-
-@dataclass
-class LeadInput:
-    """Modelo de dados conforme metadata_esperado_etapa1.txt"""
-    # Variáveis obrigatórias do metadata
-    original_id: str  # legalDocument
-    original_nome: str  # name
-    original_endereco_completo: str  # street+number+complement+district+postcode+city+state+country
-    original_telefone: Optional[str]  # phone
-    original_telefone_place: Optional[str]  # placesPhone
-    original_website: Optional[str]  # website
-    original_avaliacao_google: Optional[float]  # placesRating
-    original_latitude: Optional[float]  # placesLat
-    original_longitude: Optional[float]  # placesLng
-    original_place_users: Optional[int]  # placesUserRatingsTotal
-    original_place_website: Optional[str]  # placesWebsite
-    original_email: Optional[str]  # email
-    
-    # Campos adicionais para processamento interno
-    _places_id: Optional[str] = None  # Para referência interna
-    
-    @property
-    def display_name(self) -> str:
-        return f"{self.original_nome} (ID: {self.original_id})"
-
-@dataclass
-class CollectedData:
-    """Dados coletados pelos scrapers"""
-    # Social Media
-    gdr_facebook_url: Optional[str] = None
-    gdr_facebook_email: Optional[str] = None
-    gdr_facebook_whatsapp: Optional[str] = None
-    gdr_facebook_followers: Optional[int] = None
-    
-    gdr_instagram_url: Optional[str] = None
-    gdr_instagram_followers: Optional[int] = None
-    gdr_instagram_bio: Optional[str] = None
-    gdr_instagram_verified: Optional[bool] = None
-    
-    gdr_linktree_url: Optional[str] = None
-    gdr_linktree_links: Optional[str] = None
-    
-    # Website
-    gdr_website_email: Optional[str] = None
-    gdr_website_phone: Optional[str] = None
-    gdr_website_whatsapp: Optional[str] = None
-    gdr_website_youtube: Optional[str] = None
-    
-    # Google Search
-    gdr_search_email: Optional[str] = None
-    gdr_search_phone: Optional[str] = None
-    gdr_search_additional_info: Optional[str] = None
-
-@dataclass
-class TokenUsage:
-    """Controle de uso de tokens por LLM"""
-    provider: str
-    input_tokens: int
-    output_tokens: int
-    total_tokens: int
-    cost_usd: float
 
 class RateLimiter:
     """Controle de rate limiting"""
@@ -345,31 +346,229 @@ class GoogleSearchScraper:
             'gdr_search_additional_info': all_text[:500] if all_text else None
         }
 
-class InstagramScraper:
-    """Scraper básico para Instagram (simulado - Apify seria o ideal)"""
+class ApifyBaseScraper:
+    """Classe base para scrapers Apify"""
     
-    def __init__(self):
-        self.rate_limiter = RateLimiter(0.5)
+    def __init__(self, api_key: str):
+        try:
+            from apify_client import ApifyClient
+            self.client = ApifyClient(api_key)
+        except ImportError:
+            logger.error("apify-client não instalado. Execute: pip install apify-client")
+            self.client = None
+        self.rate_limiter = RateLimiter(0.2)  # 5 requests per second max
     
-    async def scrape_instagram_profile(self, instagram_url: str) -> Dict[str, Any]:
-        """Extrai informações básicas do perfil Instagram"""
+    async def run_actor(self, actor_id: str, input_data: Dict, timeout: int = 60) -> Optional[List[Dict]]:
+        """Executa um actor Apify e retorna os resultados com timeout"""
+        if not self.client:
+            return None
+            
         await self.rate_limiter.acquire()
         
-        if not instagram_url:
+        try:
+            logger.info(f"Executando actor {actor_id} com timeout de {timeout}s")
+            
+            # Executar o actor em thread separada com timeout
+            run = await asyncio.wait_for(
+                asyncio.to_thread(
+                    lambda: self.client.actor(actor_id).call(
+                        run_input=input_data,
+                        wait_secs=timeout
+                    )
+                ),
+                timeout=timeout + 10
+            )
+            
+            # Aguardar conclusão e obter resultados com timeout
+            items = []
+            start_time = asyncio.get_event_loop().time()
+            
+            # Converter iteração para assíncrona com timeout
+            dataset_items = await asyncio.wait_for(
+                asyncio.to_thread(
+                    lambda: list(self.client.dataset(run['defaultDatasetId']).iterate_items())
+                ),
+                timeout=30
+            )
+            
+            for item in dataset_items:
+                items.append(item)
+            
+            logger.info(f"Actor {actor_id} retornou {len(items)} resultados")
+            return items
+            
+        except asyncio.TimeoutError:
+            logger.error(f"Timeout ao executar Apify actor {actor_id}")
+            return None
+        except Exception as e:
+            logger.error(f"Erro ao executar Apify actor {actor_id}: {e}")
+            return None
+
+class InstagramScraper(ApifyBaseScraper):
+    """Scraper para Instagram usando Apify"""
+    
+    def __init__(self):
+        api_key = os.getenv('APIFY_API_KEY')
+        super().__init__(api_key)
+        # Actor ID para Instagram Profile Scraper (conforme tutorial)
+        self.actor_id = "apify/instagram-profile-scraper"
+    
+    async def scrape_instagram_profile(self, username_or_url: str) -> Dict[str, Any]:
+        """Extrai informações do perfil Instagram"""
+        if not username_or_url:
             return {}
             
         try:
-            # Simulação - em produção usaria Apify
-            # Por enquanto, extrai informações básicas da URL
-            return {
-                'gdr_instagram_url': instagram_url,
-                'gdr_instagram_followers': None,  # Seria obtido via Apify
-                'gdr_instagram_bio': None,
-                'gdr_instagram_verified': None
+            # Extrair username da URL se necessário
+            username = username_or_url
+            if 'instagram.com' in username_or_url:
+                # Remover trailing slash e extrair username
+                parts = username_or_url.rstrip('/').split('/')
+                username = parts[-1].strip('@')
+                # Verificar se não ficou vazio
+                if not username or username == 'instagram.com':
+                    logger.warning(f"Não foi possível extrair username de {username_or_url}")
+                    return {}
+            
+            logger.info(f"Buscando Instagram profile: @{username}")
+            
+            # Configurar input para o actor (conforme tutorial)
+            input_data = {
+                "usernames": [username]
             }
+            
+            # Executar scraper com timeout reduzido para Instagram
+            results = await self.run_actor(self.actor_id, input_data, timeout=45)
+            
+            if results and len(results) > 0:
+                profile = results[0]
+                return {
+                    'gdr_instagram_url': f"https://instagram.com/{profile.get('username', username)}",
+                    'gdr_instagram_followers': profile.get('followersCount', 0),
+                    'gdr_instagram_bio': profile.get('biography', ''),
+                    'gdr_instagram_verified': profile.get('verified', False)
+                }
         
         except Exception as e:
-            logger.warning(f"Erro ao processar Instagram {instagram_url}: {e}")
+            logger.warning(f"Erro ao processar Instagram {username_or_url}: {e}")
+        
+        return {}
+
+class FacebookScraper(ApifyBaseScraper):
+    """Scraper para Facebook usando Apify"""
+    
+    def __init__(self):
+        api_key = os.getenv('APIFY_API_KEY')
+        super().__init__(api_key)
+        # Actor ID para Facebook Profile Scraper (conforme tutorial)
+        self.actor_id = "curious_coder/facebook-profile-scraper"
+    
+    async def scrape_facebook_page(self, page_url_or_name: str) -> Dict[str, Any]:
+        """Extrai informações de página do Facebook"""
+        if not page_url_or_name:
+            return {}
+            
+        try:
+            logger.info(f"Buscando Facebook page: {page_url_or_name}")
+            
+            # Configurar input para o actor (conforme tutorial)
+            input_data = {
+                "profileUrls": [page_url_or_name if 'facebook.com' in page_url_or_name else f"https://www.facebook.com/{page_url_or_name}"],
+                "proxy": {
+                    "useApifyProxy": True,
+                    "apifyProxyCountry": "US"
+                },
+                "minDelay": 1,
+                "maxDelay": 3
+            }
+            
+            # Executar scraper com timeout reduzido para Instagram
+            results = await self.run_actor(self.actor_id, input_data, timeout=45)
+            
+            if results and len(results) > 0:
+                page = results[0]
+                
+                # Extrair email e WhatsApp dos dados
+                email = page.get('email')
+                phone = page.get('phone')
+                
+                # Tentar extrair WhatsApp do about ou description
+                whatsapp = None
+                about_text = page.get('about', '') + ' ' + page.get('description', '')
+                whatsapp_pattern = re.compile(r'whatsapp[^\d]*(\d{10,13})', re.IGNORECASE)
+                whatsapp_match = whatsapp_pattern.search(about_text)
+                if whatsapp_match:
+                    whatsapp = whatsapp_match.group(1)
+                
+                return {
+                    'gdr_facebook_url': page.get('url', page_url_or_name),
+                    'gdr_facebook_email': email,
+                    'gdr_facebook_whatsapp': whatsapp or phone,
+                    'gdr_facebook_followers': page.get('likes', 0)
+                }
+        
+        except Exception as e:
+            logger.warning(f"Erro ao processar Facebook {page_url_or_name}: {e}")
+        
+        return {}
+
+class LinktreeScraper(ApifyBaseScraper):
+    """Scraper para Linktree usando Apify"""
+    
+    def __init__(self):
+        api_key = os.getenv('APIFY_API_KEY_LINKTREE', os.getenv('APIFY_API_KEY'))
+        super().__init__(api_key)
+        # Actor ID para Linktree Scraper (conforme tutorial)
+        self.actor_id = "ecomscrape/linktree-profile-details-scraper"
+    
+    async def scrape_linktree_profile(self, username_or_url: str) -> Dict[str, Any]:
+        """Extrai links do perfil Linktree"""
+        if not username_or_url:
+            return {}
+            
+        try:
+            logger.info(f"Buscando Linktree profile: {username_or_url}")
+            
+            # Formatar URL corretamente
+            if 'linktr.ee' not in username_or_url:
+                url = f"https://linktr.ee/{username_or_url}"
+            else:
+                url = username_or_url
+            
+            # Configurar input para o actor (conforme tutorial)
+            input_data = {
+                "urls_or_usernames": [url],
+                "max_retries_per_url": 2,
+                "proxy": {
+                    "useApifyProxy": False
+                }
+            }
+            
+            # Executar scraper com timeout reduzido para Instagram
+            results = await self.run_actor(self.actor_id, input_data, timeout=45)
+            
+            if results and len(results) > 0:
+                profile = results[0]
+                links = profile.get('links', [])
+                
+                # Formatar links como string
+                links_formatted = []
+                for link in links:
+                    text = link.get('text', '')
+                    url = link.get('url', '')
+                    if text and url:
+                        links_formatted.append(f"{text}: {url}")
+                
+                return {
+                    'gdr_linktree_url': profile.get('from_url', ''),
+                    'gdr_linktree_links': ' | '.join(links_formatted),
+                    'gdr_linktree_username': profile.get('username', ''),
+                    'gdr_linktree_title': profile.get('title', ''),
+                    'gdr_linktree_description': profile.get('description', '')
+                }
+        
+        except Exception as e:
+            logger.warning(f"Erro ao processar Linktree {username_or_url}: {e}")
         
         return {}
 
@@ -438,19 +637,25 @@ class OpenAIProvider(LLMProvider):
         Analise os dados do lead e consolide as informações de contato:
         
         Dados originais:
-        - Nome: {lead.name}
-        - Email original: {lead.email}
-        - Telefone original: {lead.phone}
-        - Website original: {lead.website}
-        - Endereço: {lead.full_address}
-        - Tipo de negócio: {lead.business_target}
+        - Nome: {lead.original_nome}
+        - Email original: {lead.original_email}
+        - Telefone original: {lead.original_telefone}
+        - Website original: {lead.original_website}
+        - Endereço: {lead.original_endereco_completo}
+        - Tipo de negócio: {getattr(lead, 'business_target', 'N/A')}
         
         Dados coletados:
         - Website email: {collected_data.gdr_website_email}
         - Website phone: {collected_data.gdr_website_phone}
+        - Website WhatsApp: {collected_data.gdr_website_whatsapp}
         - Search email: {collected_data.gdr_search_email}
         - Search phone: {collected_data.gdr_search_phone}
-        - Instagram: {collected_data.gdr_instagram_url}
+        - Instagram: {collected_data.gdr_instagram_url} (Seguidores: {collected_data.gdr_instagram_followers})
+        - Facebook: {collected_data.gdr_facebook_url} (Seguidores: {collected_data.gdr_facebook_followers})
+        - Facebook email: {collected_data.gdr_facebook_email}
+        - Facebook WhatsApp: {collected_data.gdr_facebook_whatsapp}
+        - Linktree: {collected_data.gdr_linktree_url}
+        - Links do Linktree: {collected_data.gdr_linktree_links}
         
         Consolide as melhores informações de contato e avalie a qualidade do lead.
         """
@@ -460,7 +665,8 @@ class OpenAIProvider(LLMProvider):
         emails = [
             lead.original_email,
             collected_data.gdr_website_email,
-            collected_data.gdr_search_email
+            collected_data.gdr_search_email,
+            collected_data.gdr_facebook_email
         ]
         valid_emails = [e for e in emails if e and '@' in e]
         return valid_emails[0] if valid_emails else None
@@ -479,7 +685,8 @@ class OpenAIProvider(LLMProvider):
     def _extract_whatsapp(self, lead: LeadInput, collected_data: CollectedData) -> Optional[str]:
         """Extrai número do WhatsApp"""
         whatsapp_nums = [
-            collected_data.gdr_website_whatsapp
+            collected_data.gdr_website_whatsapp,
+            collected_data.gdr_facebook_whatsapp
         ]
         valid_whatsapp = [w for w in whatsapp_nums if w]
         return valid_whatsapp[0] if valid_whatsapp else None
@@ -554,7 +761,11 @@ class OpenAIProvider(LLMProvider):
         if lead.original_place_website:
             digital_presence.append("presença no Google")
         if collected_data.gdr_instagram_url:
-            digital_presence.append("Instagram")
+            digital_presence.append(f"Instagram ({collected_data.gdr_instagram_followers or 0} seguidores)")
+        if collected_data.gdr_facebook_url:
+            digital_presence.append(f"Facebook ({collected_data.gdr_facebook_followers or 0} seguidores)")
+        if collected_data.gdr_linktree_url:
+            digital_presence.append("Linktree")
         
         if digital_presence:
             insights.append(f"Presença digital: {', '.join(digital_presence)}")
@@ -623,19 +834,45 @@ class StatisticsCalculator:
 class GDRFramework:
     """Framework principal do GDR com persistência e recuperação"""
     
-    def __init__(self):
-        self.website_scraper = WebsiteScraper()
+    def __init__(self, enable_social_media_scrapers: bool = True, 
+                 enable_website_scraper: bool = True,
+                 enable_search_scraper: bool = True,
+                 max_social_attempts: int = 1):
+        """
+        Inicializa o framework com flags de controle para otimização
+        
+        Args:
+            enable_social_media_scrapers: Habilita scrapers de redes sociais (Instagram, Facebook, Linktree)
+            enable_website_scraper: Habilita scraper de websites
+            enable_search_scraper: Habilita Google Search scraper
+            max_social_attempts: Máximo de tentativas para encontrar perfis sociais (1-3)
+        """
+        self.enable_social_media = enable_social_media_scrapers
+        self.enable_website = enable_website_scraper
+        self.enable_search = enable_search_scraper
+        self.max_social_attempts = min(max(max_social_attempts, 1), 3)
+        
+        # Cache para evitar buscas duplicadas
+        self.social_media_cache = {}
+        
+        # Inicializar scrapers apenas se habilitados
+        self.website_scraper = WebsiteScraper() if enable_website_scraper else None
         self.google_search = GoogleSearchScraper(
             os.getenv('GOOGLE_CSE_API_KEY'),
             os.getenv('GOOGLE_CSE_ID')
-        )
-        self.instagram_scraper = InstagramScraper()
+        ) if enable_search_scraper else None
+        
+        # Scrapers de redes sociais
+        self.instagram_scraper = InstagramScraper() if enable_social_media_scrapers else None
+        self.facebook_scraper = FacebookScraper() if enable_social_media_scrapers else None
+        self.linktree_scraper = LinktreeScraper() if enable_social_media_scrapers else None
+        
         self.llm_processor = MultiLLMProcessor()
         self.stats_calculator = StatisticsCalculator()
         self.persistence_manager = PersistenceManager()
     
-    async def process_leads_batch_with_recovery(self, leads: List[LeadInput], max_concurrent: int = 3, 
-                                              checkpoint_interval: int = 10) -> Tuple[List[Dict[str, Any]], List[TokenUsage]]:
+    async def process_leads_batch_with_recovery(self, leads: List[LeadInput], max_concurrent: int = 10, 
+                                              checkpoint_interval: int = 50) -> Tuple[List[Dict[str, Any]], List[TokenUsage]]:
         """Processa lote de leads com persistência e recuperação à falhas"""
         
         # Criar ID do batch
@@ -862,7 +1099,7 @@ class GDRFramework:
         return new_fields
     
     # Manter método antigo para compatibilidade
-    async def process_leads_batch(self, leads: List[LeadInput], max_concurrent: int = 3) -> Tuple[List[Dict[str, Any]], List[TokenUsage]]:
+    async def process_leads_batch(self, leads: List[LeadInput], max_concurrent: int = 10) -> Tuple[List[Dict[str, Any]], List[TokenUsage]]:
         """Wrapper para compatibilidade - usa método com recovery"""
         return await self.process_leads_batch_with_recovery(leads, max_concurrent)
     
@@ -871,18 +1108,31 @@ class GDRFramework:
         
         collected = CollectedData()
         
-        # Website scraping - usar original_website ou original_place_website
+        # Detectar URLs de redes sociais no campo website
         website_url = lead.original_website or lead.original_place_website
+        instagram_url_from_website = None
+        facebook_url_from_website = None
+        
         if website_url:
-            website_data = await self.website_scraper.scrape_website(website_url)
-            
-            collected.gdr_website_email = website_data.get('gdr_website_email')
-            collected.gdr_website_phone = website_data.get('gdr_website_phone')
-            collected.gdr_website_whatsapp = website_data.get('gdr_website_whatsapp')
-            collected.gdr_website_youtube = website_data.get('gdr_website_youtube')
+            # Verificar se é URL do Instagram
+            if 'instagram.com' in website_url:
+                instagram_url_from_website = website_url
+                # Não fazer scraping de website em URL do Instagram
+            elif 'facebook.com' in website_url:
+                facebook_url_from_website = website_url
+                # Não fazer scraping de website em URL do Facebook
+            else:
+                # Website scraping normal - não é rede social
+                if self.enable_website and self.website_scraper:
+                    website_data = await self.website_scraper.scrape_website(website_url)
+                    
+                    collected.gdr_website_email = website_data.get('gdr_website_email')
+                    collected.gdr_website_phone = website_data.get('gdr_website_phone')
+                    collected.gdr_website_whatsapp = website_data.get('gdr_website_whatsapp')
+                    collected.gdr_website_youtube = website_data.get('gdr_website_youtube')
         
         # Google Search - usar nome e endereço do metadata
-        if lead.original_nome:
+        if self.enable_search and self.google_search and lead.original_nome:
             # Extrair cidade do endereço completo para busca mais eficiente
             location_for_search = self._extract_city_from_address(lead.original_endereco_completo)
             
@@ -894,13 +1144,56 @@ class GDRFramework:
             collected.gdr_search_phone = search_data.get('gdr_search_phone')
             collected.gdr_search_additional_info = search_data.get('gdr_search_additional_info')
         
-        # Instagram - tentar detectar perfil baseado no nome do negócio
-        instagram_data = await self._try_find_instagram_profile(lead.original_nome)
-        if instagram_data:
-            collected.gdr_instagram_url = instagram_data.get('gdr_instagram_url')
-            collected.gdr_instagram_followers = instagram_data.get('gdr_instagram_followers')
-            collected.gdr_instagram_bio = instagram_data.get('gdr_instagram_bio')
-            collected.gdr_instagram_verified = instagram_data.get('gdr_instagram_verified')
+        # Redes sociais apenas se habilitadas
+        if self.enable_social_media:
+            # Instagram - usar URL do website, original_instagram_url ou tentar detectar
+            instagram_url = instagram_url_from_website or getattr(lead, 'original_instagram_url', None)
+            
+            if instagram_url and instagram_url.strip() and instagram_url.lower() != 'nan':
+                # Usar URL fornecida
+                try:
+                    instagram_data = await self.instagram_scraper.scrape_instagram_profile(instagram_url)
+                    if instagram_data:
+                        collected.gdr_instagram_url = instagram_data.get('gdr_instagram_url')
+                        collected.gdr_instagram_followers = instagram_data.get('gdr_instagram_followers')
+                        collected.gdr_instagram_bio = instagram_data.get('gdr_instagram_bio')
+                        collected.gdr_instagram_verified = instagram_data.get('gdr_instagram_verified')
+                except Exception as e:
+                    logger.warning(f"Erro ao buscar Instagram {instagram_url}: {e}")
+            else:
+                # Tentar detectar perfil baseado no nome do negócio
+                instagram_data = await self._try_find_instagram_profile(lead.original_nome)
+                if instagram_data:
+                    collected.gdr_instagram_url = instagram_data.get('gdr_instagram_url')
+                    collected.gdr_instagram_followers = instagram_data.get('gdr_instagram_followers')
+                    collected.gdr_instagram_bio = instagram_data.get('gdr_instagram_bio')
+                    collected.gdr_instagram_verified = instagram_data.get('gdr_instagram_verified')
+            
+            # Facebook - usar URL do website ou tentar detectar
+            if facebook_url_from_website:
+                try:
+                    facebook_data = await self.facebook_scraper.scrape_facebook_page(facebook_url_from_website)
+                    if facebook_data:
+                        collected.gdr_facebook_url = facebook_data.get('gdr_facebook_url')
+                        collected.gdr_facebook_email = facebook_data.get('gdr_facebook_email')
+                        collected.gdr_facebook_whatsapp = facebook_data.get('gdr_facebook_whatsapp')
+                        collected.gdr_facebook_followers = facebook_data.get('gdr_facebook_followers')
+                except Exception as e:
+                    logger.warning(f"Erro ao buscar Facebook {facebook_url_from_website}: {e}")
+            else:
+                # Tentar detectar página baseado no nome do negócio
+                facebook_data = await self._try_find_facebook_page(lead.original_nome)
+                if facebook_data:
+                    collected.gdr_facebook_url = facebook_data.get('gdr_facebook_url')
+                    collected.gdr_facebook_email = facebook_data.get('gdr_facebook_email')
+                    collected.gdr_facebook_whatsapp = facebook_data.get('gdr_facebook_whatsapp')
+                    collected.gdr_facebook_followers = facebook_data.get('gdr_facebook_followers')
+            
+            # Linktree - tentar detectar perfil baseado no nome do negócio
+            linktree_data = await self._try_find_linktree_profile(lead.original_nome)
+            if linktree_data:
+                collected.gdr_linktree_url = linktree_data.get('gdr_linktree_url')
+                collected.gdr_linktree_links = linktree_data.get('gdr_linktree_links')
         
         return collected
     
@@ -930,6 +1223,11 @@ class GDRFramework:
     async def _try_find_instagram_profile(self, business_name: str) -> Dict[str, Any]:
         """Tenta encontrar perfil Instagram baseado no nome do negócio"""
         
+        # Verificar cache primeiro
+        cache_key = f"instagram_{business_name.lower()}"
+        if cache_key in self.social_media_cache:
+            return self.social_media_cache[cache_key]
+        
         # Simplificar nome para busca
         simplified_name = re.sub(r'[^a-zA-Z0-9]', '', business_name.lower())
         
@@ -938,15 +1236,83 @@ class GDRFramework:
             simplified_name,
             simplified_name.replace('loja', ''),
             simplified_name.replace('assistencia', ''),
-            f"{simplified_name}oficial",
-            f"{simplified_name}_"
         ]
         
-        # Para MVP, simular busca (em produção usar Apify)
-        # Por enquanto, retornar dados vazios
+        # Tentar buscar perfil com os possíveis usernames (limitado por max_social_attempts)
+        for username in possible_usernames[:self.max_social_attempts]:
+            try:
+                result = await self.instagram_scraper.scrape_instagram_profile(username)
+                if result and result.get('gdr_instagram_url'):
+                    self.social_media_cache[cache_key] = result
+                    return result
+            except Exception as e:
+                logger.debug(f"Tentativa de buscar Instagram @{username} falhou: {e}")
+        
+        # Armazenar resultado vazio no cache
+        self.social_media_cache[cache_key] = {}
         return {}
     
-    # Resto dos métodos permanecem os mesmos...
+    async def _try_find_facebook_page(self, business_name: str) -> Dict[str, Any]:
+        """Tenta encontrar página Facebook baseado no nome do negócio"""
+        
+        # Verificar cache primeiro
+        cache_key = f"facebook_{business_name.lower()}"
+        if cache_key in self.social_media_cache:
+            return self.social_media_cache[cache_key]
+        
+        # Simplificar nome para busca
+        simplified_name = re.sub(r'[^a-zA-Z0-9]', '', business_name.lower())
+        
+        # Gerar possíveis nomes de página
+        possible_names = [
+            business_name,
+            simplified_name,
+        ]
+        
+        # Tentar buscar página com os possíveis nomes (limitado por max_social_attempts)
+        for page_name in possible_names[:self.max_social_attempts]:
+            try:
+                result = await self.facebook_scraper.scrape_facebook_page(page_name)
+                if result and result.get('gdr_facebook_url'):
+                    self.social_media_cache[cache_key] = result
+                    return result
+            except Exception as e:
+                logger.debug(f"Tentativa de buscar Facebook /{page_name} falhou: {e}")
+        
+        # Armazenar resultado vazio no cache
+        self.social_media_cache[cache_key] = {}
+        return {}
+    
+    async def _try_find_linktree_profile(self, business_name: str) -> Dict[str, Any]:
+        """Tenta encontrar perfil Linktree baseado no nome do negócio"""
+        
+        # Verificar cache primeiro
+        cache_key = f"linktree_{business_name.lower()}"
+        if cache_key in self.social_media_cache:
+            return self.social_media_cache[cache_key]
+        
+        # Simplificar nome para busca
+        simplified_name = re.sub(r'[^a-zA-Z0-9]', '', business_name.lower())
+        
+        # Gerar possíveis usernames
+        possible_usernames = [
+            simplified_name,
+            simplified_name[:15]  # Linktree tem limite de caracteres
+        ]
+        
+        # Tentar buscar perfil com os possíveis usernames (limitado por max_social_attempts)
+        for username in possible_usernames[:self.max_social_attempts]:
+            try:
+                result = await self.linktree_scraper.scrape_linktree_profile(username)
+                if result and result.get('gdr_linktree_url'):
+                    self.social_media_cache[cache_key] = result
+                    return result
+            except Exception as e:
+                logger.debug(f"Tentativa de buscar Linktree @{username} falhou: {e}")
+        
+        # Armazenar resultado vazio no cache
+        self.social_media_cache[cache_key] = {}
+        return {}
     
     async def process_single_lead(self, lead: LeadInput) -> Tuple[Dict[str, Any], List[TokenUsage]]:
         """Processa um lead individual"""
@@ -988,7 +1354,7 @@ class GDRFramework:
             return final_result, token_usages
             
         except Exception as e:
-            logger.error(f"Erro processando lead {lead.id}: {e}")
+            logger.error(f"Erro processando lead {lead.original_id}: {e}")
             
             error_result = {
                 **asdict(lead),
@@ -1018,7 +1384,7 @@ class GDRFramework:
         processed_results = []
         for i, result in enumerate(results):
             if isinstance(result, Exception):
-                logger.error(f"Erro no lead {leads[i].id}: {result}")
+                logger.error(f"Erro no lead {leads[i].original_id}: {result}")
                 error_result = {
                     **asdict(leads[i]),
                     'processing_status': 'error',
@@ -1042,7 +1408,7 @@ class GDRFramework:
             
             # Aba 1: Dados Consolidados
             main_columns = [
-                'id', 'name', 'business_target', 'city', 'state',
+                'original_id', 'original_nome', 'original_endereco_completo',
                 'gdr_consolidated_email', 'gdr_consolidated_phone', 
                 'gdr_consolidated_whatsapp', 'gdr_consolidated_website',
                 'gdr_quality_score', 'gdr_kappa_overall_score',
@@ -1110,6 +1476,58 @@ class GDRFramework:
             
             'processing_date': datetime.now().isoformat()
         }
+    
+    def load_leads_from_excel(self, file_path: str) -> List[LeadInput]:
+        """Carrega leads de um arquivo Excel"""
+        try:
+            df = pd.read_excel(file_path)
+            logger.info(f"Arquivo carregado: {len(df)} registros encontrados")
+            
+            leads = []
+            for idx, row in df.iterrows():
+                try:
+                    # Mapear colunas do Excel para o modelo LeadInput
+                    lead = LeadInput(
+                        original_id=str(row.get('legalDocument', row.get('id', f'ID_{idx}'))),
+                        original_nome=str(row.get('name', '')),
+                        original_endereco_completo=self._build_address(row),
+                        original_telefone=self._clean_phone(row.get('phone')),
+                        original_telefone_place=self._clean_phone(row.get('placesPhone')),
+                        original_website=str(row.get('website', '')),
+                        original_avaliacao_google=float(row.get('placesRating', 0)) if pd.notna(row.get('placesRating')) else None,
+                        original_latitude=float(row.get('placesLat', 0)) if pd.notna(row.get('placesLat')) else None,
+                        original_longitude=float(row.get('placesLng', 0)) if pd.notna(row.get('placesLng')) else None,
+                        original_place_users=int(row.get('placesUserRatingsTotal', 0)) if pd.notna(row.get('placesUserRatingsTotal')) else None,
+                        original_place_website=str(row.get('placesWebsite', '')),
+                        original_email=str(row.get('email', '')),
+                        original_instagram_url=str(row.get('instagramUrl', '')) if pd.notna(row.get('instagramUrl')) else None
+                    )
+                    leads.append(lead)
+                except Exception as e:
+                    logger.warning(f"Erro ao processar linha {idx}: {e}")
+            
+            logger.info(f"Leads carregados com sucesso: {len(leads)}")
+            return leads
+            
+        except Exception as e:
+            logger.error(f"Erro ao carregar arquivo Excel: {e}")
+            return []
+    
+    def _build_address(self, row) -> str:
+        """Constrói endereço completo a partir dos campos"""
+        parts = []
+        for field in ['street', 'number', 'complement', 'district', 'postcode', 'city', 'state', 'country']:
+            if field in row and pd.notna(row[field]) and str(row[field]).strip():
+                parts.append(str(row[field]).strip())
+        return ', '.join(parts) if parts else ''
+    
+    def _clean_phone(self, phone) -> Optional[str]:
+        """Limpa número de telefone"""
+        if pd.isna(phone) or not str(phone).strip():
+            return None
+        # Remove caracteres não numéricos
+        cleaned = re.sub(r'\D', '', str(phone))
+        return cleaned if len(cleaned) >= 10 else None
 
 async def main():
     """Função principal para executar o processamento com persistência e recuperação"""
