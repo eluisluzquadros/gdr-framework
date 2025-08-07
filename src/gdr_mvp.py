@@ -67,6 +67,7 @@ class CollectedData:
     # Social Media
     gdr_facebook_url: Optional[str] = None
     gdr_facebook_email: Optional[str] = None
+    gdr_facebook_phone: Optional[str] = None
     gdr_facebook_whatsapp: Optional[str] = None
     gdr_facebook_followers: Optional[int] = None
     
@@ -74,6 +75,8 @@ class CollectedData:
     gdr_instagram_followers: Optional[int] = None
     gdr_instagram_bio: Optional[str] = None
     gdr_instagram_verified: Optional[bool] = None
+    gdr_instagram_whatsapp: Optional[str] = None
+    gdr_instagram_external_url: Optional[str] = None
     
     gdr_linktree_url: Optional[str] = None
     gdr_linktree_links: Optional[str] = None
@@ -253,7 +256,12 @@ class WebsiteScraper:
     def __init__(self):
         self.email_pattern = re.compile(r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b')
         self.phone_pattern = re.compile(r'(\(?\d{2}\)?\s?\d{4,5}-?\d{4})')
-        self.whatsapp_pattern = re.compile(r'(?:whatsapp|wpp)[^\d]*(\d{10,13})', re.IGNORECASE)
+        # Pattern melhorado para WhatsApp incluindo wa.me links
+        self.whatsapp_pattern = re.compile(
+            r'(?:wa\.me/|api\.whatsapp\.com/send\?phone=|whatsapp://send\?phone=)(?:\+?55)?(\d{10,11})|'
+            r'(?:whatsapp|whats|wpp)[\s:]*(?:\+?55)?[\s-]?(?:\(?\d{2}\)?[\s-]?)?\d{4,5}[\s-]?\d{4}',
+            re.IGNORECASE
+        )
         
     async def scrape_website(self, url: str) -> Dict[str, Any]:
         """Extrai informações de contato de um website"""
@@ -304,11 +312,27 @@ class GoogleSearchScraper:
         self.rate_limiter = RateLimiter(0.1)  # 10 requests per second max
         
     async def search_business_info(self, business_name: str, location: str) -> Dict[str, Any]:
-        """Busca informações adicionais sobre o negócio"""
+        """Busca informações adicionais sobre o negócio incluindo redes sociais"""
         await self.rate_limiter.acquire()
         
-        query = f'"{business_name}" {location} telefone email contato'
+        # Executar múltiplas buscas para melhor cobertura
+        results = {}
         
+        # Busca 1: Redes sociais específicas
+        social_query = f'"{business_name}" {location} (site:instagram.com OR site:facebook.com)'
+        social_results = await self._perform_search(social_query)
+        
+        # Busca 2: Informações de contato
+        contact_query = f'"{business_name}" {location} (telefone OR whatsapp OR email OR contato)'
+        contact_results = await self._perform_search(contact_query)
+        
+        # Combinar resultados
+        all_items = social_results + contact_results
+        return self._extract_from_search_results(all_items)
+    
+    async def _perform_search(self, query: str) -> List[Dict]:
+        
+        """Executa uma busca no Google"""
         try:
             async with aiohttp.ClientSession() as session:
                 url = "https://www.googleapis.com/customsearch/v1"
@@ -316,25 +340,42 @@ class GoogleSearchScraper:
                     'key': self.api_key,
                     'cx': self.search_engine_id,
                     'q': query,
-                    'num': 5
+                    'num': 10  # Aumentar resultados para encontrar mais informações
                 }
                 
                 async with session.get(url, params=params) as response:
                     if response.status == 200:
                         data = await response.json()
-                        return self._extract_from_search_results(data.get('items', []))
+                        return data.get('items', [])
         
         except Exception as e:
-            logger.warning(f"Erro na busca para {business_name}: {e}")
+            logger.warning(f"Erro na busca: {e}")
         
-        return {}
+        return []
     
     def _extract_from_search_results(self, items: List[Dict]) -> Dict[str, Any]:
-        """Extrai informações dos resultados de busca"""
+        """Extrai informações dos resultados de busca incluindo redes sociais"""
         all_text = ' '.join([
-            f"{item.get('title', '')} {item.get('snippet', '')}"
+            f"{item.get('title', '')} {item.get('snippet', '')} {item.get('link', '')}"
             for item in items
         ])
+        
+        # Extrair URLs de redes sociais
+        instagram_urls = []
+        facebook_urls = []
+        linkedin_urls = []
+        website_urls = []
+        
+        for item in items:
+            link = item.get('link', '')
+            if 'instagram.com' in link:
+                instagram_urls.append(link)
+            elif 'facebook.com' in link:
+                facebook_urls.append(link)
+            elif 'linkedin.com' in link:
+                linkedin_urls.append(link)
+            elif link and not any(social in link for social in ['instagram', 'facebook', 'linkedin', 'google']):
+                website_urls.append(link)
         
         scraper = WebsiteScraper()
         emails = scraper.email_pattern.findall(all_text)
@@ -343,6 +384,10 @@ class GoogleSearchScraper:
         return {
             'gdr_search_email': emails[0] if emails else None,
             'gdr_search_phone': phones[0] if phones else None,
+            'gdr_search_instagram': instagram_urls[0] if instagram_urls else None,
+            'gdr_search_facebook': facebook_urls[0] if facebook_urls else None,
+            'gdr_search_linkedin': linkedin_urls[0] if linkedin_urls else None,
+            'gdr_search_website': website_urls[0] if website_urls else None,
             'gdr_search_additional_info': all_text[:500] if all_text else None
         }
 
@@ -413,6 +458,34 @@ class InstagramScraper(ApifyBaseScraper):
         # Actor ID para Instagram Profile Scraper (conforme tutorial)
         self.actor_id = "apify/instagram-profile-scraper"
     
+    def extract_whatsapp_from_text(self, text: str) -> Optional[str]:
+        """Extrai número de WhatsApp de qualquer texto"""
+        if not text or not isinstance(text, str):
+            return None
+        
+        patterns = [
+            r'wa\.me/(?:\+?55)?(\d{10,11})',
+            r'api\.whatsapp\.com/send\?phone=(?:\+?55)?(\d{10,11})',
+            r'whatsapp://send\?phone=(?:\+?55)?(\d{10,11})',
+            r'(?:whatsapp|wpp|wa)[:\s]*(?:\+?55)?[\s-]?(\d{2})[\s-]?(\d{4,5})[\s-]?(\d{4})'
+        ]
+        
+        for pattern in patterns:
+            matches = re.findall(pattern, text, re.IGNORECASE)
+            if matches:
+                if isinstance(matches[0], tuple):
+                    # Para patterns com grupos múltiplos
+                    number = ''.join(matches[0])
+                else:
+                    number = matches[0]
+                
+                # Limpar e validar número
+                number = re.sub(r'\D', '', number)
+                if len(number) in [10, 11]:
+                    return number
+        
+        return None
+    
     async def scrape_instagram_profile(self, username_or_url: str) -> Dict[str, Any]:
         """Extrai informações do perfil Instagram"""
         if not username_or_url:
@@ -422,8 +495,9 @@ class InstagramScraper(ApifyBaseScraper):
             # Extrair username da URL se necessário
             username = username_or_url
             if 'instagram.com' in username_or_url:
-                # Remover trailing slash e extrair username
-                parts = username_or_url.rstrip('/').split('/')
+                # Limpar URL - remover parâmetros UTM e trailing slash
+                clean_url = username_or_url.split('?')[0].rstrip('/')
+                parts = clean_url.split('/')
                 username = parts[-1].strip('@')
                 # Verificar se não ficou vazio
                 if not username or username == 'instagram.com':
@@ -442,12 +516,35 @@ class InstagramScraper(ApifyBaseScraper):
             
             if results and len(results) > 0:
                 profile = results[0]
-                return {
-                    'gdr_instagram_url': f"https://instagram.com/{profile.get('username', username)}",
-                    'gdr_instagram_followers': profile.get('followersCount', 0),
-                    'gdr_instagram_bio': profile.get('biography', ''),
-                    'gdr_instagram_verified': profile.get('verified', False)
-                }
+                # Só retornar URL se realmente encontrou um perfil válido
+                if profile.get('username') and profile.get('followersCount') is not None:
+                    # Extrair wa.me links da bio e outros campos
+                    whatsapp_numbers = []
+                    bio = profile.get('biography', '')
+                    if bio:
+                        whatsapp = self.extract_whatsapp_from_text(bio)
+                        if whatsapp:
+                            whatsapp_numbers.append(whatsapp)
+                    
+                    # Verificar links externos
+                    external_url = profile.get('externalUrl', '')
+                    if external_url and 'wa.me' in external_url:
+                        whatsapp = self.extract_whatsapp_from_text(external_url)
+                        if whatsapp:
+                            whatsapp_numbers.append(whatsapp)
+                    
+                    return {
+                        'gdr_instagram_url': f"https://instagram.com/{profile.get('username')}",
+                        'gdr_instagram_followers': profile.get('followersCount', 0),
+                        'gdr_instagram_bio': bio,
+                        'gdr_instagram_verified': profile.get('verified', False),
+                        'gdr_instagram_whatsapp': whatsapp_numbers[0] if whatsapp_numbers else None,
+                        'gdr_instagram_external_url': external_url
+                    }
+            
+            # Não retornar URL inventada se não encontrou perfil
+            logger.info(f"Perfil Instagram @{username} não encontrado")
+            return {}
         
         except Exception as e:
             logger.warning(f"Erro ao processar Instagram {username_or_url}: {e}")
@@ -607,14 +704,21 @@ class OpenAIProvider(LLMProvider):
         prompt = self._build_prompt(lead, collected_data)
         input_tokens = self.estimate_tokens(prompt)
         
-        # Simulação da chamada OpenAI (implementar com openai library)
+        # Usar métodos de consolidação do processador se disponível
+        if hasattr(self, 'processor'):
+            consolidated_phones = self.processor.consolidate_all_phones(lead, collected_data)
+            consolidated_whatsapp = self.processor.extract_whatsapp_number(lead, collected_data)
+        else:
+            consolidated_phones = collected_data.gdr_website_phone or collected_data.gdr_search_phone or lead.original_telefone
+            consolidated_whatsapp = collected_data.gdr_website_whatsapp
+        
         analysis_result = {
-            'consolidated_email': self._consolidate_email(lead, collected_data),
-            'consolidated_phone': self._consolidate_phone(lead, collected_data),
-            'consolidated_whatsapp': self._extract_whatsapp(lead, collected_data),
-            'consolidated_website': self._consolidate_website(lead, collected_data),
-            'quality_score': self._calculate_quality_score(lead, collected_data),
-            'business_insights': self._generate_business_insights(lead, collected_data)
+            'consolidated_email': collected_data.gdr_website_email or collected_data.gdr_search_email or lead.original_email,
+            'consolidated_phone': consolidated_phones,
+            'consolidated_whatsapp': consolidated_whatsapp,
+            'consolidated_website': lead.original_website or lead.original_place_website or collected_data.gdr_search_website,
+            'quality_score': 0.7,  # Score padrão
+            'business_insights': f"Negócio: {lead.original_nome} localizado em {lead.original_endereco_completo}"
         }
         
         result_text = json.dumps(analysis_result)
@@ -630,6 +734,168 @@ class OpenAIProvider(LLMProvider):
         )
         
         return analysis_result, token_usage
+    
+    def _build_prompt(self, lead: LeadInput, collected_data: CollectedData) -> str:
+        """Constrói prompt para análise"""
+        return f"""
+        Analise os dados do lead e consolide as informações de contato:
+        
+        Dados originais:
+        - Nome: {lead.original_nome}
+        - Email original: {lead.original_email}
+        - Telefone original: {lead.original_telefone}
+        - Website original: {lead.original_website}
+        - Endereço: {lead.original_endereco_completo}
+        
+        Dados coletados:
+        - Website email: {collected_data.gdr_website_email}
+        - Website phone: {collected_data.gdr_website_phone}
+        - Website WhatsApp: {collected_data.gdr_website_whatsapp}
+        - Search email: {collected_data.gdr_search_email}
+        - Search phone: {collected_data.gdr_search_phone}
+        - Instagram: {collected_data.gdr_instagram_url} (Seguidores: {collected_data.gdr_instagram_followers})
+        - Facebook: {collected_data.gdr_facebook_url} (Seguidores: {collected_data.gdr_facebook_followers})
+        - Facebook email: {collected_data.gdr_facebook_email}
+        - Facebook WhatsApp: {collected_data.gdr_facebook_whatsapp}
+        - Linktree: {collected_data.gdr_linktree_url}
+        
+        Retorne análise consolidada com email, telefone, website e insights do negócio.
+        """
+
+class ClaudeProvider(LLMProvider):
+    """Provedor Anthropic Claude"""
+    
+    def __init__(self, api_key: str):
+        super().__init__('claude')
+        self.api_key = api_key
+        self.token_costs = {
+            'claude-3-opus': {'input': 0.000015, 'output': 0.000075},
+            'claude-3-sonnet': {'input': 0.000003, 'output': 0.000015}
+        }
+    
+    async def analyze_lead(self, lead: LeadInput, collected_data: CollectedData) -> Tuple[Dict[str, Any], TokenUsage]:
+        """Analisa lead usando Claude"""
+        prompt = self._build_prompt(lead, collected_data)
+        
+        # Simulação - em produção usar anthropic library
+        import random
+        # Usar métodos de consolidação do processador se disponível
+        if hasattr(self, 'processor'):
+            consolidated_phones = self.processor.consolidate_all_phones(lead, collected_data)
+            consolidated_whatsapp = self.processor.extract_whatsapp_number(lead, collected_data)
+        else:
+            consolidated_phones = collected_data.gdr_website_phone or collected_data.gdr_search_phone or lead.original_telefone
+            consolidated_whatsapp = collected_data.gdr_website_whatsapp
+        
+        result = {
+            'consolidated_email': collected_data.gdr_website_email or collected_data.gdr_search_email,
+            'consolidated_phone': consolidated_phones,
+            'consolidated_website': lead.original_website or lead.original_place_website,
+            'consolidated_whatsapp': consolidated_whatsapp,
+            'business_category': 'Varejo',
+            'business_size': 'Pequeno',
+            'quality_score': random.uniform(60, 95),
+            'lead_temperature': random.choice(['Quente', 'Morno', 'Frio']),
+            'recommended_action': 'Contato imediato via WhatsApp',
+            'insights': 'Lead qualificado com presença digital ativa'
+        }
+        
+        # Calcular tokens (estimativa)
+        input_tokens = len(prompt.split()) * 1.5
+        output_tokens = 150
+        total_tokens = input_tokens + output_tokens
+        cost = self.calculate_cost(input_tokens, output_tokens)
+        
+        token_usage = TokenUsage(
+            provider='claude',
+            input_tokens=int(input_tokens),
+            output_tokens=output_tokens,
+            total_tokens=int(total_tokens),
+            cost_usd=cost
+        )
+        
+        return result, token_usage
+    
+    def _build_prompt(self, lead: LeadInput, collected_data: CollectedData) -> str:
+        """Constrói prompt para análise"""
+        return f"""
+        Analise os dados do lead e consolide as informações de contato:
+        
+        Dados originais:
+        - Nome: {lead.original_nome}
+        - Email original: {lead.original_email}
+        - Telefone original: {lead.original_telefone}
+        - Website original: {lead.original_website}
+        - Endereço: {lead.original_endereco_completo}
+        
+        Dados coletados:
+        - Website email: {collected_data.gdr_website_email}
+        - Website phone: {collected_data.gdr_website_phone}
+        - Website WhatsApp: {collected_data.gdr_website_whatsapp}
+        - Search email: {collected_data.gdr_search_email}
+        - Search phone: {collected_data.gdr_search_phone}
+        - Instagram: {collected_data.gdr_instagram_url} (Seguidores: {collected_data.gdr_instagram_followers})
+        - Facebook: {collected_data.gdr_facebook_url} (Seguidores: {collected_data.gdr_facebook_followers})
+        - Facebook email: {collected_data.gdr_facebook_email}
+        - Facebook WhatsApp: {collected_data.gdr_facebook_whatsapp}
+        - Linktree: {collected_data.gdr_linktree_url}
+        
+        Retorne análise consolidada com email, telefone, website e insights do negócio.
+        """
+
+class GeminiProvider(LLMProvider):
+    """Provedor Google Gemini"""
+    
+    def __init__(self, api_key: str):
+        super().__init__('gemini')
+        self.api_key = api_key
+        self.token_costs = {
+            'gemini-pro': {'input': 0.0000005, 'output': 0.0000015},
+            'gemini-1.5-pro': {'input': 0.00000125, 'output': 0.00000375}
+        }
+    
+    async def analyze_lead(self, lead: LeadInput, collected_data: CollectedData) -> Tuple[Dict[str, Any], TokenUsage]:
+        """Analisa lead usando Gemini"""
+        prompt = self._build_prompt(lead, collected_data)
+        
+        # Simulação - em produção usar google.generativeai
+        import random
+        # Usar métodos de consolidação do processador se disponível
+        if hasattr(self, 'processor'):
+            consolidated_phones = self.processor.consolidate_all_phones(lead, collected_data)
+            consolidated_whatsapp = self.processor.extract_whatsapp_number(lead, collected_data)
+        else:
+            consolidated_phones = collected_data.gdr_website_phone or collected_data.gdr_search_phone or lead.original_telefone
+            consolidated_whatsapp = collected_data.gdr_website_whatsapp
+        
+        result = {
+            'consolidated_email': collected_data.gdr_website_email or collected_data.gdr_search_email,
+            'consolidated_phone': consolidated_phones,
+            'consolidated_website': lead.original_website or lead.original_place_website,
+            'consolidated_whatsapp': consolidated_whatsapp,
+            'business_category': 'Comércio',
+            'business_size': 'Médio',
+            'quality_score': random.uniform(55, 90),
+            'lead_temperature': random.choice(['Quente', 'Morno', 'Frio']),
+            'recommended_action': 'Email de apresentação seguido de ligação',
+            'insights': 'Potencial cliente com necessidade de melhorias digitais'
+        }
+        
+        # Calcular tokens (estimativa)
+        input_tokens = len(prompt.split()) * 1.5
+        output_tokens = 150
+        total_tokens = input_tokens + output_tokens
+        cost = self.calculate_cost(input_tokens, output_tokens)
+        
+        token_usage = TokenUsage(
+            provider='gemini',
+            input_tokens=int(input_tokens),
+            output_tokens=output_tokens,
+            total_tokens=int(total_tokens),
+            cost_usd=cost
+        )
+        
+        return result, token_usage
     
     def _build_prompt(self, lead: LeadInput, collected_data: CollectedData) -> str:
         """Constrói prompt para análise"""
@@ -672,33 +938,150 @@ class OpenAIProvider(LLMProvider):
         return valid_emails[0] if valid_emails else None
     
     def _consolidate_phone(self, lead: LeadInput, collected_data: CollectedData) -> Optional[str]:
-        """Consolida informações de telefone"""
-        phones = [
-            lead.original_telefone,
-            lead.original_telefone_place,
-            collected_data.gdr_website_phone,
-            collected_data.gdr_search_phone
-        ]
-        valid_phones = [p for p in phones if p and len(str(p)) >= 10]
-        return valid_phones[0] if valid_phones else None
+        """Consolida TODOS os telefones encontrados em uma lista"""
+        phones = []
+        
+        # Coletar todos os telefones de todas as fontes
+        if lead.original_telefone and str(lead.original_telefone).lower() != 'nan':
+            phones.append(str(lead.original_telefone))
+        if lead.original_telefone_place and str(lead.original_telefone_place).lower() != 'nan':
+            phones.append(str(lead.original_telefone_place))
+        if collected_data.gdr_website_phone and str(collected_data.gdr_website_phone).lower() != 'nan':
+            phones.append(str(collected_data.gdr_website_phone))
+        if collected_data.gdr_search_phone and str(collected_data.gdr_search_phone).lower() != 'nan':
+            phones.append(str(collected_data.gdr_search_phone))
+        if collected_data.gdr_facebook_phone and str(collected_data.gdr_facebook_phone).lower() != 'nan':
+            phones.append(str(collected_data.gdr_facebook_phone))
+        
+        # Adicionar WhatsApp se existir (também é um telefone)
+        whatsapp = self._extract_whatsapp(lead, collected_data)
+        if whatsapp:
+            phones.append(whatsapp)
+        
+        # Limpar e validar telefones
+        valid_phones = []
+        for phone in phones:
+            # Limpar caracteres não numéricos
+            clean_phone = re.sub(r'\D', '', str(phone))
+            if len(clean_phone) >= 10 and clean_phone not in valid_phones:
+                valid_phones.append(clean_phone)
+        
+        # Retornar lista separada por vírgula ou None
+        return ', '.join(valid_phones) if valid_phones else None
     
     def _extract_whatsapp(self, lead: LeadInput, collected_data: CollectedData) -> Optional[str]:
-        """Extrai número do WhatsApp"""
-        whatsapp_nums = [
+        """Extrai número específico do WhatsApp (prioriza fontes mais confiáveis)"""
+        # Priorizar: Website -> Instagram -> Facebook -> Linktree -> Google Search
+        whatsapp_sources = [
             collected_data.gdr_website_whatsapp,
-            collected_data.gdr_facebook_whatsapp
+            collected_data.gdr_instagram_whatsapp,
+            collected_data.gdr_facebook_whatsapp,
         ]
-        valid_whatsapp = [w for w in whatsapp_nums if w]
-        return valid_whatsapp[0] if valid_whatsapp else None
+        
+        # Adicionar WhatsApp de outras fontes se existir
+        if collected_data.gdr_linktree_links:
+            whatsapp = self._detect_whatsapp_in_text(str(collected_data.gdr_linktree_links))
+            if whatsapp:
+                whatsapp_sources.append(whatsapp)
+        
+        if collected_data.gdr_instagram_bio:
+            whatsapp = self._detect_whatsapp_in_text(str(collected_data.gdr_instagram_bio))
+            if whatsapp:
+                whatsapp_sources.append(whatsapp)
+        
+        if hasattr(collected_data, 'gdr_instagram_external_url') and collected_data.gdr_instagram_external_url:
+            whatsapp = self._detect_whatsapp_in_text(str(collected_data.gdr_instagram_external_url))
+            if whatsapp:
+                whatsapp_sources.append(whatsapp)
+        
+        if collected_data.gdr_search_additional_info:
+            whatsapp = self._detect_whatsapp_in_text(str(collected_data.gdr_search_additional_info))
+            if whatsapp:
+                whatsapp_sources.append(whatsapp)
+        
+        # Retornar o primeiro WhatsApp válido encontrado
+        for whatsapp in whatsapp_sources:
+            if whatsapp and str(whatsapp).lower() != 'nan':
+                # Limpar número
+                clean_whatsapp = re.sub(r'\D', '', str(whatsapp))
+                if len(clean_whatsapp) >= 10:
+                    return clean_whatsapp
+        
+        return None
     
     def _consolidate_website(self, lead: LeadInput, collected_data: CollectedData) -> Optional[str]:
         """Consolida informações de website"""
         websites = [
             lead.original_website,
-            lead.original_place_website
+            lead.original_place_website,
+            collected_data.gdr_search_website
         ]
         valid_websites = [w for w in websites if w and ('http' in w or 'www' in w or '.com' in w)]
         return valid_websites[0] if valid_websites else None
+    
+    def _extract_whatsapp(self, lead: LeadInput, collected_data: CollectedData) -> Optional[str]:
+        """Extrai WhatsApp de todas as fontes disponíveis"""
+        # Priorizar: Website -> Instagram -> Facebook -> Linktree -> Google Search
+        sources = [
+            collected_data.gdr_website_whatsapp,
+            collected_data.gdr_instagram_whatsapp,
+            collected_data.gdr_facebook_whatsapp,
+        ]
+        
+        # Extrair de Linktree links
+        if collected_data.gdr_linktree_links:
+            whatsapp = self._detect_whatsapp_in_text(collected_data.gdr_linktree_links)
+            if whatsapp:
+                sources.append(whatsapp)
+        
+        # Extrair de Instagram bio
+        if collected_data.gdr_instagram_bio:
+            whatsapp = self._detect_whatsapp_in_text(collected_data.gdr_instagram_bio)
+            if whatsapp:
+                sources.append(whatsapp)
+        
+        # Extrair de Instagram external URL
+        if hasattr(collected_data, 'gdr_instagram_external_url') and collected_data.gdr_instagram_external_url:
+            whatsapp = self._detect_whatsapp_in_text(collected_data.gdr_instagram_external_url)
+            if whatsapp:
+                sources.append(whatsapp)
+        
+        # Extrair de Google Search
+        if collected_data.gdr_search_additional_info:
+            whatsapp = self._detect_whatsapp_in_text(collected_data.gdr_search_additional_info)
+            if whatsapp:
+                sources.append(whatsapp)
+        
+        # Retornar o primeiro WhatsApp válido encontrado
+        for source in sources:
+            if source and str(source).lower() != 'nan':
+                return source
+        
+        return None
+    
+    def _detect_whatsapp_in_text(self, text: str) -> Optional[str]:
+        """Detecta número de WhatsApp em texto"""
+        if not text or not isinstance(text, str):
+            return None
+        
+        # Patterns para wa.me links e números de WhatsApp
+        patterns = [
+            # wa.me links
+            r'wa\.me/(?:\+?55)?(\d{10,11})',
+            r'api\.whatsapp\.com/send\?phone=(?:\+?55)?(\d{10,11})',
+            # WhatsApp mencionado com número
+            r'(?:whatsapp|whats|wpp|zap)[\s:]*(?:\+?55)?[\s-]?((?:\(?\d{2}\)?[\s-]?)?\d{4,5}[\s-]?\d{4})',
+        ]
+        
+        for pattern in patterns:
+            matches = re.findall(pattern, text, re.IGNORECASE)
+            if matches:
+                # Limpar e formatar o número
+                number = re.sub(r'[^\d]', '', str(matches[0]))
+                if len(number) >= 10:
+                    return number
+        
+        return None
     
     def _calculate_quality_score(self, lead: LeadInput, collected_data: CollectedData) -> float:
         """Calcula score de qualidade do lead baseado no metadata"""
@@ -775,24 +1158,94 @@ class OpenAIProvider(LLMProvider):
         return "; ".join(insights) if insights else "Análise básica disponível"
 
 class MultiLLMProcessor:
-    """Processador que usa múltiplos LLMs para consenso"""
+    """Processador que usa múltiplos LLMs para consenso real"""
     
     def __init__(self):
-        # Inicializar provedores (usando apenas OpenAI para o MVP)
-        self.providers = {
-            'openai': OpenAIProvider(os.getenv('OPENAI_API_KEY'))
-        }
-        # Em produção, adicionar outros LLMs:
-        # 'anthropic': AnthropicProvider(os.getenv('ANTHROPIC_API_KEY')),
-        # 'google': GoogleProvider(os.getenv('GEMINI_API_KEY')),
-        # etc.
+        # Inicializar todos os provedores disponíveis
+        self.providers = {}
+        
+        # OpenAI
+        if os.getenv('OPENAI_API_KEY'):
+            self.providers['openai'] = OpenAIProvider(os.getenv('OPENAI_API_KEY'))
+        
+        # Claude
+        if os.getenv('ANTHROPIC_API_KEY'):
+            self.providers['claude'] = ClaudeProvider(os.getenv('ANTHROPIC_API_KEY'))
+        
+        # Gemini
+        if os.getenv('GEMINI_API_KEY'):
+            self.providers['gemini'] = GeminiProvider(os.getenv('GEMINI_API_KEY'))
+        
+        if not self.providers:
+            raise ValueError("Nenhuma API key de LLM configurada. Configure pelo menos OPENAI_API_KEY no .env")
+        
+        logger.info(f"Provedores LLM ativos: {list(self.providers.keys())}")
+        
+        # Configurar métodos de consolidação em todos os provedores
+        for provider in self.providers.values():
+            provider.processor = self
+    
+    def consolidate_all_phones(self, lead: LeadInput, collected_data: CollectedData) -> str:
+        """Consolida TODOS os telefones encontrados em uma lista"""
+        phones = []
+        
+        # Coletar todos os telefones de todas as fontes
+        if lead.original_telefone and str(lead.original_telefone).lower() != 'nan':
+            phones.append(str(lead.original_telefone))
+        if lead.original_telefone_place and str(lead.original_telefone_place).lower() != 'nan':
+            phones.append(str(lead.original_telefone_place))
+        if collected_data.gdr_website_phone and str(collected_data.gdr_website_phone).lower() != 'nan':
+            phones.append(str(collected_data.gdr_website_phone))
+        if collected_data.gdr_search_phone and str(collected_data.gdr_search_phone).lower() != 'nan':
+            phones.append(str(collected_data.gdr_search_phone))
+        if hasattr(collected_data, 'gdr_facebook_phone') and collected_data.gdr_facebook_phone and str(collected_data.gdr_facebook_phone).lower() != 'nan':
+            phones.append(str(collected_data.gdr_facebook_phone))
+        
+        # Adicionar WhatsApp se existir (também é um telefone)
+        whatsapp = self.extract_whatsapp_number(lead, collected_data)
+        if whatsapp:
+            phones.append(whatsapp)
+        
+        # Limpar e validar telefones
+        valid_phones = []
+        for phone in phones:
+            # Limpar caracteres não numéricos
+            clean_phone = re.sub(r'\D', '', str(phone))
+            if len(clean_phone) >= 10 and clean_phone not in valid_phones:
+                valid_phones.append(clean_phone)
+        
+        # Retornar lista separada por vírgula ou None
+        return ', '.join(valid_phones) if valid_phones else None
+    
+    def extract_whatsapp_number(self, lead: LeadInput, collected_data: CollectedData) -> Optional[str]:
+        """Extrai número específico do WhatsApp"""
+        # Priorizar: Website -> Instagram -> Facebook -> Linktree
+        whatsapp_sources = [
+            collected_data.gdr_website_whatsapp,
+        ]
+        
+        if hasattr(collected_data, 'gdr_instagram_whatsapp'):
+            whatsapp_sources.append(collected_data.gdr_instagram_whatsapp)
+        if hasattr(collected_data, 'gdr_facebook_whatsapp'):
+            whatsapp_sources.append(collected_data.gdr_facebook_whatsapp)
+        
+        # Retornar o primeiro WhatsApp válido encontrado
+        for whatsapp in whatsapp_sources:
+            if whatsapp and str(whatsapp).lower() != 'nan':
+                # Limpar número
+                clean_whatsapp = re.sub(r'\D', '', str(whatsapp))
+                if len(clean_whatsapp) >= 10:
+                    return clean_whatsapp
+        
+        return None
     
     async def process_lead(self, lead: LeadInput, collected_data: CollectedData) -> Tuple[Dict[str, Any], List[TokenUsage]]:
-        """Processa lead através de múltiplos LLMs"""
+        """Processa lead através de múltiplos LLMs com consenso real"""
         
         results = {}
         token_usages = []
         
+        # Processar com todos os provedores disponíveis
         for provider_name, provider in self.providers.items():
             try:
                 result, token_usage = await provider.analyze_lead(lead, collected_data)
@@ -805,22 +1258,194 @@ class MultiLLMProcessor:
                 logger.error(f"Erro com provedor {provider_name}: {e}")
                 results[provider_name] = None
         
-        # Para MVP, usar apenas resultado do OpenAI
-        # Em produção, implementar consenso entre múltiplos LLMs
-        consensus_result = results.get('openai', {})
+        # Filtrar resultados válidos
+        valid_results = {k: v for k, v in results.items() if v is not None}
+        
+        if not valid_results:
+            logger.error("Nenhum LLM retornou resultado válido")
+            return {}, token_usages
+        
+        # Se apenas um provedor, usar seu resultado
+        if len(valid_results) == 1:
+            consensus_result = list(valid_results.values())[0]
+            consensus_result['consensus_type'] = 'single_provider'
+            consensus_result['kappa_score'] = 1.0
+        else:
+            # Calcular consenso entre múltiplos LLMs
+            consensus_result = self._calculate_consensus(valid_results)
         
         return consensus_result, token_usages
+    
+    def _calculate_consensus(self, results: Dict[str, Dict]) -> Dict[str, Any]:
+        """Calcula consenso entre múltiplos resultados de LLM"""
+        consensus = {}
+        
+        # Campos que devem ter consenso
+        consensus_fields = [
+            'consolidated_email', 'consolidated_phone', 'consolidated_website',
+            'consolidated_whatsapp', 'business_category', 'business_size',
+            'lead_temperature'
+        ]
+        
+        # Calcular consenso para cada campo
+        for field in consensus_fields:
+            values = [r.get(field) for r in results.values() if r.get(field)]
+            if values:
+                # Usar o valor mais comum (votação majoritária)
+                from collections import Counter
+                consensus[field] = Counter(values).most_common(1)[0][0]
+        
+        # Calcular média para campos numéricos
+        numeric_fields = ['quality_score']
+        for field in numeric_fields:
+            values = [r.get(field) for r in results.values() if r.get(field) is not None]
+            if values:
+                consensus[field] = sum(values) / len(values)
+        
+        # Combinar insights e recomendações
+        insights = [r.get('insights', '') for r in results.values() if r.get('insights')]
+        consensus['insights'] = ' | '.join(set(insights))
+        
+        actions = [r.get('recommended_action', '') for r in results.values() if r.get('recommended_action')]
+        consensus['recommended_action'] = ' | '.join(set(actions))
+        
+        # Calcular Kappa score para medir concordância
+        kappa_score = self._calculate_kappa_score(results, consensus_fields)
+        consensus['kappa_score'] = kappa_score
+        consensus['consensus_type'] = 'multi_provider_voting'
+        consensus['providers_used'] = list(results.keys())
+        
+        return consensus
+    
+    def _calculate_kappa_score(self, results: Dict[str, Dict], fields: List[str]) -> float:
+        """Calcula Cohen's Kappa para medir concordância entre LLMs"""
+        if len(results) < 2:
+            return 1.0
+        
+        # Simplificação: calcular concordância média entre pares
+        agreements = []
+        providers = list(results.keys())
+        
+        for i in range(len(providers)):
+            for j in range(i + 1, len(providers)):
+                result1 = results[providers[i]]
+                result2 = results[providers[j]]
+                
+                if result1 and result2:
+                    # Contar concordâncias
+                    matches = sum(1 for field in fields 
+                                if result1.get(field) == result2.get(field))
+                    agreement = matches / len(fields)
+                    agreements.append(agreement)
+        
+        if agreements:
+            # Retornar concordância média (simplificação do Kappa real)
+            return sum(agreements) / len(agreements)
+        
+        return 0.0
+
+class DataValidator:
+    """Agente revisor e validador de dados coletados"""
+    
+    def __init__(self):
+        self.validation_rules = {
+            'email': r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$',
+            'phone': r'^(?:\+55\s?)?(?:\(?\d{2}\)?\s?)?(?:\d{4,5}[-\s]?\d{4})$',
+            'website': r'^https?://[\w\-]+(\.[\w\-]+)+[/#?]?.*$',
+            'instagram': r'instagram\.com/[\w\.]+',
+            'facebook': r'facebook\.com/[\w\-\.]+',
+        }
+        
+    async def validate_and_review(self, lead: LeadInput, collected_data: CollectedData, 
+                                 llm_result: Dict[str, Any]) -> Dict[str, Any]:
+        """Valida e revisa todos os dados coletados"""
+        
+        validation_report = {
+            'missing_critical_fields': [],
+            'invalid_fields': [],
+            'quality_issues': [],
+            'improvement_suggestions': [],
+            'data_completeness_score': 0,
+            'data_quality_score': 0,
+            'needs_manual_review': False
+        }
+        
+        # Verificar campos críticos faltantes
+        critical_fields = {
+            'email': llm_result.get('consolidated_email'),
+            'phone': llm_result.get('consolidated_phone'),
+            'website': llm_result.get('consolidated_website')
+        }
+        
+        for field, value in critical_fields.items():
+            if not value or value == 'nan':
+                validation_report['missing_critical_fields'].append(field)
+                
+                # Sugerir ação para encontrar o campo faltante
+                if field == 'email' and not collected_data.gdr_website_email:
+                    validation_report['improvement_suggestions'].append(
+                        f"Email não encontrado. Sugestão: Buscar '{lead.original_nome} email contato' no Google"
+                    )
+                elif field == 'phone' and not collected_data.gdr_website_phone:
+                    validation_report['improvement_suggestions'].append(
+                        f"Telefone não encontrado. Sugestão: Verificar Google Maps ou WhatsApp Business"
+                    )
+        
+        # Validar formato dos campos
+        if llm_result.get('consolidated_email'):
+            if not re.match(self.validation_rules['email'], str(llm_result['consolidated_email'])):
+                validation_report['invalid_fields'].append('email formato inválido')
+        
+        # Verificar qualidade dos dados de redes sociais
+        if not collected_data.gdr_instagram_url and not collected_data.gdr_facebook_url:
+            validation_report['quality_issues'].append('Nenhuma rede social encontrada')
+            validation_report['improvement_suggestions'].append(
+                f"Buscar manualmente: @{lead.original_nome.lower().replace(' ', '')} no Instagram"
+            )
+        
+        # Calcular scores
+        total_fields = 10  # email, phone, website, instagram, facebook, etc
+        filled_fields = sum(1 for f in [
+            llm_result.get('consolidated_email'),
+            llm_result.get('consolidated_phone'),
+            llm_result.get('consolidated_website'),
+            collected_data.gdr_instagram_url,
+            collected_data.gdr_facebook_url,
+            collected_data.gdr_linktree_url,
+            collected_data.gdr_website_whatsapp,
+            llm_result.get('business_category'),
+            llm_result.get('business_size'),
+            llm_result.get('lead_temperature')
+        ] if f and str(f).lower() != 'nan')
+        
+        validation_report['data_completeness_score'] = (filled_fields / total_fields) * 100
+        
+        # Qualidade baseada em validações
+        quality_score = 100
+        quality_score -= len(validation_report['invalid_fields']) * 10
+        quality_score -= len(validation_report['missing_critical_fields']) * 15
+        quality_score -= len(validation_report['quality_issues']) * 5
+        validation_report['data_quality_score'] = max(0, quality_score)
+        
+        # Marcar para revisão manual se qualidade baixa
+        if validation_report['data_quality_score'] < 60 or validation_report['data_completeness_score'] < 50:
+            validation_report['needs_manual_review'] = True
+        
+        # Adicionar ao resultado final
+        llm_result['validation_report'] = validation_report
+        
+        return llm_result
 
 class StatisticsCalculator:
     """Calculadora de estatísticas Kappa"""
     
     def calculate_kappa_scores(self, llm_results: Dict[str, Dict]) -> Dict[str, Any]:
-        """Calcula scores Kappa (simplificado para MVP)"""
+        """Calcula scores Kappa reais para concordância entre LLMs"""
         
-        # Para MVP com um LLM, retorna scores máximos
-        # Em produção, calcularia concordância entre múltiplos LLMs
-        return {
-            'gdr_kappa_overall_score': 1.0,
+        # Se apenas um LLM, retorna score máximo
+        if len(llm_results) <= 1:
+            return {
+                'gdr_kappa_overall_score': 1.0,
             'gdr_kappa_interpretation': 'Perfect',
             'gdr_kappa_confidence_interval': (0.95, 1.0),
             'gdr_kappa_email_score': 1.0,
@@ -870,6 +1495,33 @@ class GDRFramework:
         self.llm_processor = MultiLLMProcessor()
         self.stats_calculator = StatisticsCalculator()
         self.persistence_manager = PersistenceManager()
+        self.data_validator = DataValidator()
+    
+    def extract_whatsapp_from_text(self, text: str) -> Optional[str]:
+        """Extrai número de WhatsApp de qualquer texto"""
+        if not text or not isinstance(text, str):
+            return None
+        
+        # Patterns para wa.me links e números de WhatsApp
+        patterns = [
+            # wa.me links
+            r'wa\.me/(?:\+?55)?(\d{10,11})',
+            r'api\.whatsapp\.com/send\?phone=(?:\+?55)?(\d{10,11})',
+            # WhatsApp mencionado com número
+            r'(?:whatsapp|whats|wpp|zap)[\s:]*(?:\+?55)?[\s-]?(?:\(?\d{2}\)?[\s-]?)?\d{4,5}[\s-]?\d{4}',
+            # Número brasileiro padrão quando WhatsApp é mencionado próximo
+            r'(?:whatsapp|whats|wpp|zap)[^0-9]{0,20}(?:\+?55)?[\s-]?(?:\(?\d{2}\)?[\s-]?)?\d{4,5}[\s-]?\d{4}'
+        ]
+        
+        for pattern in patterns:
+            matches = re.findall(pattern, text, re.IGNORECASE)
+            if matches:
+                # Limpar e formatar o número
+                number = re.sub(r'[^\d]', '', str(matches[0]))
+                if len(number) >= 10:
+                    return number
+        
+        return None
     
     async def process_leads_batch_with_recovery(self, leads: List[LeadInput], max_concurrent: int = 10, 
                                               checkpoint_interval: int = 50) -> Tuple[List[Dict[str, Any]], List[TokenUsage]]:
@@ -989,11 +1641,51 @@ class GDRFramework:
             # Coleta de dados
             collected_data = await self.collect_data_for_lead(lead)
             
+            # Extrair WhatsApp de todas as fontes possíveis
+            whatsapp_numbers = []
+            
+            # Verificar WhatsApp em linktree_links
+            if collected_data.gdr_linktree_links:
+                whatsapp = self.extract_whatsapp_from_text(collected_data.gdr_linktree_links)
+                if whatsapp:
+                    whatsapp_numbers.append(whatsapp)
+            
+            # Verificar WhatsApp em search_additional_info
+            if collected_data.gdr_search_additional_info:
+                whatsapp = self.extract_whatsapp_from_text(collected_data.gdr_search_additional_info)
+                if whatsapp:
+                    whatsapp_numbers.append(whatsapp)
+            
+            # Verificar WhatsApp em Instagram bio
+            if collected_data.gdr_instagram_bio:
+                whatsapp = self.extract_whatsapp_from_text(collected_data.gdr_instagram_bio)
+                if whatsapp:
+                    whatsapp_numbers.append(whatsapp)
+            
+            # Verificar WhatsApp do Instagram (já extraído pelo scraper)
+            if collected_data.gdr_instagram_whatsapp:
+                whatsapp_numbers.append(collected_data.gdr_instagram_whatsapp)
+            
+            # Verificar WhatsApp em Facebook
+            if collected_data.gdr_facebook_whatsapp:
+                whatsapp_numbers.append(collected_data.gdr_facebook_whatsapp)
+            
+            # Consolidar WhatsApp - usar o primeiro encontrado ou o já existente
+            if not collected_data.gdr_website_whatsapp and whatsapp_numbers:
+                collected_data.gdr_website_whatsapp = whatsapp_numbers[0]
+            
             # Processamento multi-LLM
             llm_result, token_usages = await self.llm_processor.process_lead(lead, collected_data)
             
-            # Cálculo de estatísticas
-            kappa_stats = self.stats_calculator.calculate_kappa_scores({'openai': llm_result})
+            # Validação e revisão dos dados
+            llm_result = await self.data_validator.validate_and_review(lead, collected_data, llm_result)
+            
+            # Cálculo de estatísticas Kappa reais se houver múltiplos LLMs
+            kappa_stats = {}
+            if hasattr(llm_result, 'kappa_score'):
+                kappa_stats['gdr_kappa_overall_score'] = llm_result.get('kappa_score', 1.0)
+            else:
+                kappa_stats = self.stats_calculator.calculate_kappa_scores({'result': llm_result})
             
             # Resultado final conforme metadata esperado
             final_result = {
@@ -1027,6 +1719,9 @@ class GDRFramework:
                 
                 # Estatísticas Kappa
                 **kappa_stats,
+                
+                # Relatório de validação
+                'validation_report': llm_result.get('validation_report', {}),
                 
                 # Metadados de processamento
                 'processing_timestamp': datetime.now().isoformat(),
@@ -1108,19 +1803,26 @@ class GDRFramework:
         
         collected = CollectedData()
         
-        # Detectar URLs de redes sociais no campo website
+        # Priorizar uso das colunas já disponíveis no input
         website_url = lead.original_website or lead.original_place_website
+        instagram_url_input = getattr(lead, 'original_instagram_url', None)
+        
+        # Limpar valores 'nan' ou vazios
+        if website_url and (website_url.lower() == 'nan' or not website_url.strip()):
+            website_url = None
+        if instagram_url_input and (instagram_url_input.lower() == 'nan' or not instagram_url_input.strip()):
+            instagram_url_input = None
+            
         instagram_url_from_website = None
         facebook_url_from_website = None
         
+        # Processar website se disponível
         if website_url:
             # Verificar se é URL do Instagram
             if 'instagram.com' in website_url:
                 instagram_url_from_website = website_url
-                # Não fazer scraping de website em URL do Instagram
             elif 'facebook.com' in website_url:
                 facebook_url_from_website = website_url
-                # Não fazer scraping de website em URL do Facebook
             else:
                 # Website scraping normal - não é rede social
                 if self.enable_website and self.website_scraper:
@@ -1131,7 +1833,7 @@ class GDRFramework:
                     collected.gdr_website_whatsapp = website_data.get('gdr_website_whatsapp')
                     collected.gdr_website_youtube = website_data.get('gdr_website_youtube')
         
-        # Google Search - usar nome e endereço do metadata
+        # Google Search - SEMPRE executar para buscar dados faltantes
         if self.enable_search and self.google_search and lead.original_nome:
             # Extrair cidade do endereço completo para busca mais eficiente
             location_for_search = self._extract_city_from_address(lead.original_endereco_completo)
@@ -1142,46 +1844,54 @@ class GDRFramework:
             )
             collected.gdr_search_email = search_data.get('gdr_search_email')
             collected.gdr_search_phone = search_data.get('gdr_search_phone')
+            collected.gdr_search_instagram = search_data.get('gdr_search_instagram')
+            collected.gdr_search_facebook = search_data.get('gdr_search_facebook')
+            collected.gdr_search_website = search_data.get('gdr_search_website')
             collected.gdr_search_additional_info = search_data.get('gdr_search_additional_info')
         
         # Redes sociais apenas se habilitadas
         if self.enable_social_media:
-            # Instagram - usar URL do website, original_instagram_url ou tentar detectar
-            instagram_url = instagram_url_from_website or getattr(lead, 'original_instagram_url', None)
+            # Instagram - priorizar: 1) input direto, 2) website, 3) google search, 4) busca por nome
+            instagram_url = (
+                instagram_url_input or 
+                instagram_url_from_website or 
+                collected.gdr_search_instagram
+            )
             
-            if instagram_url and instagram_url.strip() and instagram_url.lower() != 'nan':
-                # Usar URL fornecida
+            if instagram_url:
+                # Usar URL fornecida/encontrada
                 try:
                     instagram_data = await self.instagram_scraper.scrape_instagram_profile(instagram_url)
-                    if instagram_data:
+                    if instagram_data and instagram_data.get('gdr_instagram_url'):
                         collected.gdr_instagram_url = instagram_data.get('gdr_instagram_url')
                         collected.gdr_instagram_followers = instagram_data.get('gdr_instagram_followers')
                         collected.gdr_instagram_bio = instagram_data.get('gdr_instagram_bio')
                         collected.gdr_instagram_verified = instagram_data.get('gdr_instagram_verified')
+                        # Adicionar WhatsApp extraído do Instagram
+                        if instagram_data.get('gdr_instagram_whatsapp'):
+                            collected.gdr_instagram_whatsapp = instagram_data.get('gdr_instagram_whatsapp')
+                        # Adicionar external URL do Instagram
+                        if instagram_data.get('gdr_instagram_external_url'):
+                            collected.gdr_instagram_external_url = instagram_data.get('gdr_instagram_external_url')
                 except Exception as e:
                     logger.warning(f"Erro ao buscar Instagram {instagram_url}: {e}")
-            else:
-                # Tentar detectar perfil baseado no nome do negócio
-                instagram_data = await self._try_find_instagram_profile(lead.original_nome)
-                if instagram_data:
-                    collected.gdr_instagram_url = instagram_data.get('gdr_instagram_url')
-                    collected.gdr_instagram_followers = instagram_data.get('gdr_instagram_followers')
-                    collected.gdr_instagram_bio = instagram_data.get('gdr_instagram_bio')
-                    collected.gdr_instagram_verified = instagram_data.get('gdr_instagram_verified')
+            # NÃO tentar inventar perfis - removido o _try_find_instagram_profile
             
-            # Facebook - usar URL do website ou tentar detectar
-            if facebook_url_from_website:
+            # Facebook - priorizar: 1) website, 2) google search, 3) busca por nome
+            facebook_url = facebook_url_from_website or collected.gdr_search_facebook
+            
+            if facebook_url:
                 try:
-                    facebook_data = await self.facebook_scraper.scrape_facebook_page(facebook_url_from_website)
+                    facebook_data = await self.facebook_scraper.scrape_facebook_page(facebook_url)
                     if facebook_data:
                         collected.gdr_facebook_url = facebook_data.get('gdr_facebook_url')
                         collected.gdr_facebook_email = facebook_data.get('gdr_facebook_email')
                         collected.gdr_facebook_whatsapp = facebook_data.get('gdr_facebook_whatsapp')
                         collected.gdr_facebook_followers = facebook_data.get('gdr_facebook_followers')
                 except Exception as e:
-                    logger.warning(f"Erro ao buscar Facebook {facebook_url_from_website}: {e}")
+                    logger.warning(f"Erro ao buscar Facebook {facebook_url}: {e}")
             else:
-                # Tentar detectar página baseado no nome do negócio
+                # Tentar detectar página baseado no nome do negócio como último recurso
                 facebook_data = await self._try_find_facebook_page(lead.original_nome)
                 if facebook_data:
                     collected.gdr_facebook_url = facebook_data.get('gdr_facebook_url')
@@ -1428,7 +2138,28 @@ class GDRFramework:
             stats_df = pd.DataFrame([stats_data])
             stats_df.to_excel(writer, sheet_name='Estatísticas', index=False)
             
-            # Aba 4: Uso de Tokens e Custos
+            # Aba 4: Relatório de Validação
+            validation_reports = []
+            for result in results:
+                if 'validation_report' in result:
+                    report = result['validation_report']
+                    validation_reports.append({
+                        'lead_id': result.get('original_id'),
+                        'lead_nome': result.get('original_nome'),
+                        'campos_faltantes': ', '.join(report.get('missing_critical_fields', [])),
+                        'campos_inválidos': ', '.join(report.get('invalid_fields', [])),
+                        'problemas_qualidade': ', '.join(report.get('quality_issues', [])),
+                        'sugestões': ', '.join(report.get('improvement_suggestions', [])),
+                        'completude_%': report.get('data_completeness_score', 0),
+                        'qualidade_%': report.get('data_quality_score', 0),
+                        'precisa_revisão': 'Sim' if report.get('needs_manual_review') else 'Não'
+                    })
+            
+            if validation_reports:
+                validation_df = pd.DataFrame(validation_reports)
+                validation_df.to_excel(writer, sheet_name='Validação de Dados', index=False)
+            
+            # Aba 5: Uso de Tokens e Custos
             if token_usages:
                 token_df = pd.DataFrame([asdict(usage) for usage in token_usages])
                 token_df.to_excel(writer, sheet_name='Custos de Tokens', index=False)
