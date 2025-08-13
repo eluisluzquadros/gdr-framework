@@ -1,0 +1,109 @@
+# GDR Framework - Git Ignore
+
+# Environment
+.env
+.env.local
+.env.*.local
+venv/
+env/
+ENV/
+.venv/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Logs
+*.log
+logs/
+gdr_v3_1_enterprise.log
+
+# Database
+*.duckdb
+*.duckdb.wal
+*.db
+*.sqlite
+*.sqlite3
+
+# Data files
+data/input/*.xlsx
+data/input/*.csv
+data/*.duckdb*
+outputs/*.xlsx
+outputs/*.json
+outputs/*.csv
+
+# Test coverage
+htmlcov/
+.tox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+.hypothesis/
+.pytest_cache/
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# pyenv
+.python-version
+
+# Checkpoints and state
+gdr_state/
+checkpoints/
+*.checkpoint
+*.pkl
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+*.bak
+*.backup
+
+# OS files
+Thumbs.db
+Desktop.ini
+
+# Sensitive data
+*.key
+*.pem
+*.cert
+credentials.json
+secrets.yaml
+
+# Keep structure
+!data/input/.gitkeep
+!outputs/.gitkeep
+!tests/.gitkeep
+!docs/.gitkeep
